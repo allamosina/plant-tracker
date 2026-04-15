@@ -1,0 +1,73 @@
+export type PlantStatus = 'healthy' | 'needs_attention' | 'recovering'
+
+export type LogType =
+  | 'watering'
+  | 'misting'
+  | 'fertilizing'
+  | 'repotting'
+  | 'pruning'
+  | 'issue_observed'
+
+export interface Plant {
+  id: string
+  user_id: string
+  name: string
+  nickname: string | null
+  species: string | null
+  location: string | null
+  acquisition_date: string | null
+  notes: string | null
+  status: PlantStatus
+  photo_url: string | null
+  // Watering
+  last_watered_at: string | null
+  next_watered_at: string | null
+  watering_interval_days: number | null
+  watering_source: string | null
+  // Misting
+  last_misted_at: string | null
+  next_misted_at: string | null
+  misting_interval_days: number | null
+  misting_source: string | null
+  // Fertilizing
+  last_fertilized_at: string | null
+  next_fertilized_at: string | null
+  fertilizing_interval_days: number | null
+  fertilizing_source: string | null
+  // Repotting
+  last_repotted_at: string | null
+  // Care profile
+  light_requirement: string | null
+  humidity_preference: string | null
+  temperature_min: number | null
+  temperature_max: number | null
+  soil_type: string | null
+  // Meta
+  archived_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PlantLog {
+  id: string
+  plant_id: string
+  user_id: string
+  type: LogType
+  date: string
+  note: string | null
+  photo_url: string | null
+  issue_description: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PlantWithLastLog extends Plant {
+  last_log_date?: string | null
+}
+
+export interface UpcomingTask {
+  key: string
+  plant: Plant
+  type: 'watering' | 'misting' | 'fertilizing'
+  dueDate: string // YYYY-MM-DD
+}
