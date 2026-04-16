@@ -6,13 +6,72 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Camera, Timer } from 'lucide-react'
-import Image from 'next/image'
+import { Camera, ImageIcon, Timer, RefreshCw } from 'lucide-react'
 import { format, addDays, parseISO } from 'date-fns'
-import { useCreatePlant, useUpdatePlant } from '@/lib/hooks/use-plants'
+import { useCreatePlant, useUpdatePlant, useLocations } from '@/lib/hooks/use-plants'
 import { usePhotoUpload } from '@/lib/hooks/use-photo-upload'
 import { lookupCareProfile } from '@/lib/actions/species-lookup'
+import { identifyPlantFromPhoto } from '@/lib/actions/identify-plant'
 import type { Plant, PlantStatus } from '@/lib/types'
+
+/** Resize a File to ≤1024px longest side and return as base64 JPEG. */
+async function resizeAndEncode(
+  file: File,
+): Promise<{ base64: string; mimeType: 'image/jpeg' }> {
+  return new Promise((resolve, reject) => {
+    const img = document.createElement('img')
+    const blobUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      const maxDim = 1024
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        if (width >= height) {
+          height = Math.round((height * maxDim) / width)
+          width = maxDim
+        } else {
+          width = Math.round((width * maxDim) / height)
+          height = maxDim
+        }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      canvas.getContext('2d')!.drawImage(img, 0, 0, width, height)
+      URL.revokeObjectURL(blobUrl)
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error('canvas toBlob failed'))
+          const reader = new FileReader()
+          reader.onload = (ev) => {
+            const dataUrl = ev.target!.result as string
+            resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg' })
+          }
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        },
+        'image/jpeg',
+        0.85,
+      )
+    }
+    img.onerror = reject
+    img.src = blobUrl
+  })
+}
+
+// ─── pot types ───────────────────────────────────────────────────────────────
+
+const POT_TYPES = ['plastic', 'terracotta', 'stoneware', 'glass', 'other'] as const
+type PotType = typeof POT_TYPES[number]
+
+const POT_LABELS: Record<PotType, string> = {
+  plastic: 'Plastic',
+  terracotta: 'Terracotta',
+  stoneware: 'Stoneware',
+  glass: 'Glass',
+  other: 'Other',
+}
+
+// ─── schema ──────────────────────────────────────────────────────────────────
 
 const schema = z.object({
   name: z.string().min(1, 'Plant name is required'),
@@ -25,8 +84,9 @@ const schema = z.object({
   last_watered_at: z.string().optional(),
   last_misted_at: z.string().optional(),
   last_fertilized_at: z.string().optional(),
-  next_fertilized_at: z.string().optional(),
   last_repotted_at: z.string().optional(),
+  pot_diameter_cm: z.string().optional(),
+  pot_height_cm: z.string().optional(),
 })
 
 type FormData = z.infer<typeof schema>
@@ -37,16 +97,24 @@ const STATUS_OPTIONS: { value: PlantStatus; label: string }[] = [
   { value: 'recovering', label: 'Recovering' },
 ]
 
+// ─── component ───────────────────────────────────────────────────────────────
+
 export function PlantForm({ plant }: { plant?: Plant }) {
   const router = useRouter()
-  const fileRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
+  const galleryRef = useRef<HTMLInputElement>(null)
+
   const [photoUrl, setPhotoUrl] = useState<string | null>(plant?.photo_url ?? null)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [lookingUp, setLookingUp] = useState(false)
+  const [identifying, setIdentifying] = useState(false)
+  const [identifyFailed, setIdentifyFailed] = useState(false)
+  const [potType, setPotType] = useState<PotType | null>((plant?.pot_type as PotType | null) ?? null)
 
   const createPlant = useCreatePlant()
   const updatePlant = useUpdatePlant(plant?.id ?? '')
   const { uploadPhoto, uploading } = usePhotoUpload()
+  const { data: existingLocations = [] } = useLocations()
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -61,25 +129,78 @@ export function PlantForm({ plant }: { plant?: Plant }) {
       last_watered_at: plant?.last_watered_at ?? '',
       last_misted_at: plant?.last_misted_at ?? '',
       last_fertilized_at: plant?.last_fertilized_at ?? '',
-      next_fertilized_at: plant?.next_fertilized_at ?? '',
       last_repotted_at: plant?.last_repotted_at ?? '',
+      pot_diameter_cm: plant?.pot_diameter_cm?.toString() ?? '',
+      pot_height_cm: plant?.pot_height_cm?.toString() ?? '',
     },
   })
 
   const status = watch('status')
   const speciesValue = watch('species')
+  const locationValue = watch('location')
 
-  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+
     setPhotoFile(file)
-    setPhotoUrl(URL.createObjectURL(file))
+    setPhotoUrl(null)          // hide previous preview while identifying
+    setIdentifyFailed(false)
+    setIdentifying(true)
+
+    let base64: string
+    let mimeType: 'image/jpeg'
+
+    try {
+      const encoded = await resizeAndEncode(file)
+      base64 = encoded.base64
+      mimeType = encoded.mimeType
+    } catch {
+      // Resize failed — fall back to raw data URL, skip identification
+      const reader = new FileReader()
+      reader.onload = (ev) => setPhotoUrl(ev.target?.result as string)
+      reader.readAsDataURL(file)
+      setIdentifyFailed(true)
+      setIdentifying(false)
+      return
+    }
+
+    try {
+      const result = await identifyPlantFromPhoto(base64, mimeType)
+      // Show preview only after identification attempt
+      setPhotoUrl(`data:image/jpeg;base64,${base64}`)
+      if (result) {
+        setValue('name', result.commonName)
+        setValue('species', result.species)
+      } else {
+        setIdentifyFailed(true)
+      }
+    } catch {
+      setPhotoUrl(`data:image/jpeg;base64,${base64}`)
+      setIdentifyFailed(true)
+    } finally {
+      setIdentifying(false)
+    }
+  }
+
+  function handleRemovePhoto() {
+    setPhotoUrl(null)
+    setPhotoFile(null)
+    setIdentifyFailed(false)
   }
 
   async function onSubmit(data: FormData) {
     try {
-      let finalPhotoUrl = photoUrl
-      if (photoFile) finalPhotoUrl = await uploadPhoto(photoFile, 'plants')
+      let finalPhotoUrl: string | null = plant?.photo_url ?? null
+      if (photoFile) {
+        finalPhotoUrl = await uploadPhoto(photoFile, 'plants')
+      } else if (photoUrl && !photoUrl.startsWith('data:')) {
+        // Already a remote URL — keep it
+        finalPhotoUrl = photoUrl
+      } else if (!photoUrl) {
+        // User removed the photo
+        finalPhotoUrl = null
+      }
 
       // Species care profile lookup
       const speciesChanged = data.species !== (plant?.species ?? '')
@@ -102,7 +223,6 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         if (profile) {
           wateringIntervalDays = profile.wateringIntervalDays
           wateringSource = profile.wateringSource
-          // Misting and fertilizing intervals always come from Claude (Perenual doesn't provide them)
           mistingIntervalDays = profile.mistingIntervalDays
           mistingSource = profile.mistingIntervalDays ? 'claude' : null
           fertilizingIntervalDays = profile.fertilizingIntervalDays
@@ -115,13 +235,13 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         }
       }
 
-      // Compute next_watered_at from last_watered_at + interval
+      // Compute next_watered_at
       let nextWateredAt: string | null = plant?.next_watered_at ?? null
       if (data.last_watered_at && wateringIntervalDays) {
         nextWateredAt = format(addDays(parseISO(data.last_watered_at), wateringIntervalDays), 'yyyy-MM-dd')
       }
 
-      // Compute next_misted_at from last_misted_at + interval (or today as fallback)
+      // Compute next_misted_at
       let nextMistedAt: string | null = plant?.next_misted_at ?? null
       if (data.last_misted_at && mistingIntervalDays) {
         nextMistedAt = format(addDays(parseISO(data.last_misted_at), mistingIntervalDays), 'yyyy-MM-dd')
@@ -129,9 +249,9 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         nextMistedAt = format(addDays(new Date(), mistingIntervalDays), 'yyyy-MM-dd')
       }
 
-      // Compute next_fertilized_at
-      let nextFertilizedAt: string | null = data.next_fertilized_at || plant?.next_fertilized_at || null
-      if (data.last_fertilized_at && fertilizingIntervalDays && !data.next_fertilized_at) {
+      // Compute next_fertilized_at (auto only — no manual entry)
+      let nextFertilizedAt: string | null = plant?.next_fertilized_at ?? null
+      if (data.last_fertilized_at && fertilizingIntervalDays) {
         nextFertilizedAt = format(addDays(parseISO(data.last_fertilized_at), fertilizingIntervalDays), 'yyyy-MM-dd')
       }
 
@@ -165,6 +285,10 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         soil_type: soilType,
         temperature_min: temperatureMin,
         temperature_max: temperatureMax,
+        // Pot
+        pot_type: potType,
+        pot_diameter_cm: data.pot_diameter_cm ? Number(data.pot_diameter_cm) : null,
+        pot_height_cm: data.pot_height_cm ? Number(data.pot_height_cm) : null,
         // Misc
         last_repotted_at: data.last_repotted_at || null,
       }
@@ -184,7 +308,7 @@ export function PlantForm({ plant }: { plant?: Plant }) {
     }
   }
 
-  const isLoading = createPlant.isPending || updatePlant.isPending || uploading || lookingUp
+  const isLoading = createPlant.isPending || updatePlant.isPending || uploading || lookingUp || identifying
 
   const submitLabel = lookingUp
     ? 'Detecting care schedule…'
@@ -202,40 +326,86 @@ export function PlantForm({ plant }: { plant?: Plant }) {
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 px-4 py-4 pb-8">
 
       {/* Photo */}
-      <div className="flex flex-col items-center justify-center">
-        <div
-          className="w-32 h-32 rounded-full bg-stone-200 border-2 border-dashed border-stone-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:border-leaf-400 transition-colors mb-2"
-          onClick={() => fileRef.current?.click()}
-        >
-          {photoUrl ? (
-            <Image src={photoUrl} alt="Plant photo" fill className="object-cover" sizes="128px" />
+      <div className="flex flex-col items-center gap-3">
+
+        {/* Circle — loader → preview → empty */}
+        <div className="w-32 h-32 rounded-full bg-stone-200 border-2 border-dashed border-stone-300 flex items-center justify-center overflow-hidden">
+          {identifying ? (
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-7 h-7 rounded-full border-2 border-stone-300 border-t-leaf-500 animate-spin" />
+              <span className="text-[10px] text-stone-400 font-medium">Identifying…</span>
+            </div>
+          ) : photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photoUrl} alt="Plant photo" className="w-full h-full object-cover" />
           ) : (
             <div className="flex flex-col items-center text-stone-400">
               <Camera size={24} className="mb-1" />
-              <span className="text-xs font-medium">Add Photo</span>
+              <span className="text-xs font-medium">No photo</span>
             </div>
           )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="absolute inset-0 opacity-0 cursor-pointer"
-            onChange={handlePhotoChange}
-          />
         </div>
-        {photoUrl && (
+
+        {/* Actions below the circle */}
+        {!identifying && identifyFailed ? (
+          /* Could not identify */
+          <div className="flex flex-col items-center gap-2 text-center">
+            <p className="text-xs text-stone-500">Couldn&apos;t identify this plant</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleRemovePhoto}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
+              >
+                <RefreshCw size={11} />
+                Try another photo
+              </button>
+              <button
+                type="button"
+                onClick={() => setIdentifyFailed(false)}
+                className="px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
+              >
+                Add manually
+              </button>
+            </div>
+          </div>
+        ) : !identifying && photoUrl ? (
+          /* Photo set and identified (or existing saved photo) */
           <button
             type="button"
-            className="text-xs text-clay-500 font-medium"
-            onClick={() => { setPhotoUrl(null); setPhotoFile(null) }}
+            className="text-xs text-stone-400 font-medium"
+            onClick={handleRemovePhoto}
           >
-            Remove Photo
+            Remove photo
           </button>
-        )}
+        ) : !identifying ? (
+          /* No photo yet */
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => cameraRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
+            >
+              <Camera size={13} />
+              Camera
+            </button>
+            <button
+              type="button"
+              onClick={() => galleryRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
+            >
+              <ImageIcon size={13} />
+              Gallery
+            </button>
+          </div>
+        ) : null}
+
+        {/* Hidden inputs */}
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoChange} />
+        <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
       </div>
 
-      {/* Basic info card */}
+      {/* Basic info */}
       <div className="bg-stone-100 rounded-xl p-5 border border-stone-300 space-y-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
         <div>
           <label className="label-caps">Name *</label>
@@ -285,29 +455,52 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         </div>
       </div>
 
-      {/* Location & notes card */}
+      {/* Location & notes */}
       <div className="bg-stone-100 rounded-xl p-5 border border-stone-300 space-y-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="label-caps">Location</label>
-            <input type="text" placeholder="e.g. Living Room" className="input-underline" {...register('location')} />
-          </div>
-          <div>
-            <label className="label-caps">Acquired</label>
-            <input type="date" max={format(new Date(), 'yyyy-MM-dd')} className="input-underline" {...register('acquisition_date')} />
-          </div>
+        <div>
+          <label className="label-caps">Location</label>
+          <input
+            type="text"
+            placeholder="e.g. Living Room"
+            className="input-underline"
+            {...register('location')}
+          />
+          {existingLocations.length > 0 && (
+            <div className="flex gap-2 mt-2 overflow-x-auto pb-0.5 scrollbar-none">
+              {existingLocations.map((loc) => (
+                <button
+                  key={loc}
+                  type="button"
+                  onClick={() => setValue('location', locationValue === loc ? '' : loc)}
+                  className={`flex-shrink-0 px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors ${
+                    locationValue === loc
+                      ? 'bg-leaf-500 text-stone-50 border-leaf-500'
+                      : 'bg-stone-200 border-stone-300 text-olive-600 hover:bg-stone-300'
+                  }`}
+                >
+                  {loc}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
+        <div>
+          <label className="label-caps">Acquired</label>
+          <input type="date" max={format(new Date(), 'yyyy-MM-dd')} className="input-underline" {...register('acquisition_date')} />
+        </div>
+
         <div>
           <label className="label-caps">Notes</label>
           <textarea placeholder="Care instructions, quirks, etc." rows={3} className="input-underline resize-none" {...register('notes')} />
         </div>
       </div>
 
-      {/* Care dates card */}
+      {/* Care dates */}
       <div className="bg-stone-100 rounded-xl p-5 border border-stone-300 space-y-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
         <div>
           <p className="label-caps !mb-0">Initial care dates</p>
-          <p className="text-[10px] text-stone-400 mt-1">Next watering is calculated automatically. Future care updates via the log.</p>
+          <p className="text-[10px] text-stone-400 mt-1">Next dates are calculated automatically. Future updates via the log.</p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -335,12 +528,58 @@ export function PlantForm({ plant }: { plant?: Plant }) {
             <input type="date" className="input-underline" {...register('last_fertilized_at')} />
           </div>
           <div>
-            <label className="label-caps">Next fertilizing</label>
-            <input type="date" className="input-underline" {...register('next_fertilized_at')} />
-          </div>
-          <div>
             <label className="label-caps">Last repotted</label>
             <input type="date" className="input-underline" {...register('last_repotted_at')} />
+          </div>
+        </div>
+      </div>
+
+      {/* Pot info */}
+      <div className="bg-stone-100 rounded-xl p-5 border border-stone-300 space-y-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+        <p className="label-caps !mb-0">Pot</p>
+
+        <div>
+          <label className="label-caps">Type</label>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {POT_TYPES.map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setPotType(potType === type ? null : type)}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                  potType === type
+                    ? 'bg-leaf-500 text-stone-50 border-leaf-500'
+                    : 'bg-stone-200 border-stone-300 text-olive-500 hover:bg-stone-300'
+                }`}
+              >
+                {POT_LABELS[type]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label-caps">Diameter (cm)</label>
+            <input
+              type="number"
+              min="1"
+              max="200"
+              placeholder="e.g. 14"
+              className="input-underline"
+              {...register('pot_diameter_cm')}
+            />
+          </div>
+          <div>
+            <label className="label-caps">Height (cm)</label>
+            <input
+              type="number"
+              min="1"
+              max="200"
+              placeholder="e.g. 12"
+              className="input-underline"
+              {...register('pot_height_cm')}
+            />
           </div>
         </div>
       </div>

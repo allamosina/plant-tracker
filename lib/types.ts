@@ -36,6 +36,10 @@ export interface Plant {
   fertilizing_source: string | null
   // Repotting
   last_repotted_at: string | null
+  // Pot info
+  pot_type: string | null
+  pot_diameter_cm: number | null
+  pot_height_cm: number | null
   // Care profile
   light_requirement: string | null
   humidity_preference: string | null

@@ -3,6 +3,23 @@ import { parseISO, isBefore, startOfToday } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import type { Plant, UpcomingTask } from '@/lib/types'
 
+export function useLocations() {
+  return useQuery({
+    queryKey: ['locations'],
+    queryFn: async () => {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('plants')
+        .select('location')
+        .is('archived_at', null)
+        .not('location', 'is', null)
+      if (error) throw error
+      const locs = [...new Set(data.map((r: { location: string }) => r.location as string))]
+      return locs.sort() as string[]
+    },
+  })
+}
+
 export function useArchivedPlants() {
   return useQuery({
     queryKey: ['plants', 'archived'],

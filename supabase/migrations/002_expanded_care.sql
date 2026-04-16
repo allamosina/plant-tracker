@@ -18,5 +18,10 @@ alter table plants add column if not exists temperature_min integer;  -- Celsius
 alter table plants add column if not exists temperature_max integer;
 alter table plants add column if not exists soil_type text;
 
+-- Pot info
+alter table plants add column if not exists pot_type text;          -- plastic | terracotta | stoneware | glass | other
+alter table plants add column if not exists pot_diameter_cm integer;
+alter table plants add column if not exists pot_height_cm integer;
+
 -- Add misting as a loggable action
 alter type log_type add value if not exists 'misting';
