@@ -153,8 +153,6 @@ export async function lookupCareProfile(species: string): Promise<CareProfile | 
   }
 }
 
-// Legacy export kept so existing callers still compile
-export type { CareProfile as SpeciesLookupResult }
 export const lookupWateringInterval = async (species: string) => {
   const profile = await lookupCareProfile(species)
   if (!profile) return null
