@@ -24,7 +24,7 @@ export async function identifyPlantFromPhoto(
   try {
     const client = new Anthropic({ apiKey })
     const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-opus-4-6',
       max_tokens: 128,
       messages: [
         {
@@ -50,7 +50,8 @@ If you cannot identify the plant with reasonable confidence, reply: {"species": 
     const parsed = JSON.parse(jsonStr)
     if (!parsed.species) return null
     return { species: parsed.species as string, commonName: parsed.commonName as string }
-  } catch {
+  } catch (err) {
+    console.error('[identify-plant] error:', err)
     return null
   }
 }

@@ -22,7 +22,7 @@ async function resizeAndEncode(
     const img = document.createElement('img')
     const blobUrl = URL.createObjectURL(file)
     img.onload = () => {
-      const maxDim = 1024
+      const maxDim = 512
       let { width, height } = img
       if (width > maxDim || height > maxDim) {
         if (width >= height) {
