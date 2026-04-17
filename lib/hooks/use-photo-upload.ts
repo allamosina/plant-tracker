@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 export function usePhotoUpload() {
   const [uploading, setUploading] = useState(false)
 
-  async function uploadPhoto(file: File, folder: 'plants' | 'logs'): Promise<string> {
+  async function uploadPhoto(file: File, folder: 'plants' | 'logs' | 'locations'): Promise<string> {
     setUploading(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()

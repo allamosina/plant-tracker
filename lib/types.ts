@@ -78,3 +78,15 @@ export interface UpcomingTask {
   type: 'watering' | 'misting' | 'fertilizing'
   dueDate: string // YYYY-MM-DD
 }
+
+export interface SiteLocation {
+  id: string
+  user_id: string
+  name: string
+  light_level: string | null  // low | medium | bright_indirect | direct
+  humidity: string | null     // low | medium | high
+  notes: string | null
+  photo_urls: string[]
+  created_at: string
+  updated_at: string
+}
