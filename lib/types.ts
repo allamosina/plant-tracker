@@ -46,6 +46,9 @@ export interface Plant {
   temperature_min: number | null
   temperature_max: number | null
   soil_type: string | null
+  // Watering recommendation (generated once by Claude, cached)
+  watering_recommendation: string | null
+  watering_recommendation_updated_at: string | null
   // Meta
   archived_at: string | null
   created_at: string

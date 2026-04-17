@@ -291,6 +291,9 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         pot_height_cm: data.pot_height_cm ? Number(data.pot_height_cm) : null,
         // Misc
         last_repotted_at: data.last_repotted_at || null,
+        // Recommendation — preserved on update, null on create (generated on first open)
+        watering_recommendation: plant?.watering_recommendation ?? null,
+        watering_recommendation_updated_at: plant?.watering_recommendation_updated_at ?? null,
       }
 
       if (plant) {
