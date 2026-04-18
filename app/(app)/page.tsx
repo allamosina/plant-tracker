@@ -1,16 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { format, isToday, isTomorrow, isPast, parseISO, startOfToday, differenceInCalendarDays, addDays } from 'date-fns'
 import { Droplets, Sprout, Wind, CheckCircle2, Plus, HelpCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { useUpcomingTasks } from '@/lib/hooks/use-plants'
+import { useSiteLocations } from '@/lib/hooks/use-locations'
 import { useCreateLog } from '@/lib/hooks/use-logs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { generateWateringRecommendation } from '@/lib/actions/generate-recommendation'
-import { computeSmartWateringInterval } from '@/lib/utils/smart-interval'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval } from '@/lib/utils/smart-interval'
 import { createClient } from '@/lib/supabase/client'
 import type { UpcomingTask, Plant } from '@/lib/types'
 
@@ -60,11 +61,13 @@ const ACTION_CONFIG = {
 
 function WateringSheet({
   task,
+  geoLat,
   onClose,
   onComplete,
   onSnooze,
 }: {
   task: UpcomingTask
+  geoLat: number | null
   onClose: () => void
   onComplete: () => void
   onSnooze: () => void
@@ -87,7 +90,7 @@ function WateringSheet({
       light_requirement: plant.light_requirement,
       humidity_preference: plant.humidity_preference,
       soil_type: plant.soil_type,
-      watering_interval_days: computeSmartWateringInterval(plant) ?? plant.watering_interval_days,
+      watering_interval_days: computeSmartWateringInterval(plant, geoLat) ?? plant.watering_interval_days,
     })
       .then((text) => {
         setRecommendation(text)
@@ -107,7 +110,7 @@ function WateringSheet({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const smartInterval = computeSmartWateringInterval(plant)
+  const smartInterval = computeSmartWateringInterval(plant, geoLat)
 
   return (
     <>
@@ -321,13 +324,21 @@ function NoPlants() {
 
 export default function TasksPage() {
   const { tasks, isLoading } = useUpcomingTasks()
+  const { data: siteLocations } = useSiteLocations()
   const createLog = useCreateLog()
   const [sheetTask, setSheetTask] = useState<UpcomingTask | null>(null)
 
+  const locationLatMap = useMemo(
+    () => new Map((siteLocations ?? []).map((l) => [l.name, l.geo_lat])),
+    [siteLocations],
+  )
+
   async function handleComplete(task: UpcomingTask) {
     const { plant, type } = task
-    // Use smart-adjusted interval for next-date calculation
-    const smartWateringInterval = computeSmartWateringInterval(plant)
+    const geoLat = locationLatMap.get(plant.location ?? '') ?? null
+    const smartWateringInterval = computeSmartWateringInterval(plant, geoLat)
+    const fertResult = computeSmartFertilizingInterval(plant, geoLat)
+    const smartFertilizingInterval = fertResult && !fertResult.suspended ? fertResult.days : null
     try {
       await createLog.mutateAsync({
         plant_id: plant.id,
@@ -338,7 +349,7 @@ export default function TasksPage() {
         photo_url: null,
         wateringIntervalDays: smartWateringInterval ?? plant.watering_interval_days,
         mistingIntervalDays: plant.misting_interval_days,
-        fertilizingIntervalDays: plant.fertilizing_interval_days,
+        fertilizingIntervalDays: smartFertilizingInterval ?? plant.fertilizing_interval_days,
       })
       toast.success(`${ACTION_CONFIG[type].label}ing logged for ${plant.nickname ?? plant.name}`)
     } catch {
@@ -419,6 +430,7 @@ export default function TasksPage() {
       {sheetTask && (
         <WateringSheet
           task={sheetTask}
+          geoLat={locationLatMap.get(sheetTask.plant.location ?? '') ?? null}
           onClose={() => setSheetTask(null)}
           onComplete={() => {
             handleComplete(sheetTask)

@@ -9,8 +9,11 @@ import { toast } from 'sonner'
 import { Camera, ImageIcon, Timer, RefreshCw } from 'lucide-react'
 import { format, addDays, parseISO } from 'date-fns'
 import { useCreatePlant, useUpdatePlant, useLocations } from '@/lib/hooks/use-plants'
+import { useSiteLocations } from '@/lib/hooks/use-locations'
 import { usePhotoUpload } from '@/lib/hooks/use-photo-upload'
-import { lookupCareProfile } from '@/lib/actions/species-lookup'
+import { lookupCareProfile, searchPlantSpecies } from '@/lib/actions/species-lookup'
+import type { PlantSuggestion } from '@/lib/actions/species-lookup'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval } from '@/lib/utils/smart-interval'
 import { identifyPlantFromPhoto } from '@/lib/actions/identify-plant'
 import type { Plant, PlantStatus } from '@/lib/types'
 
@@ -97,6 +100,82 @@ const STATUS_OPTIONS: { value: PlantStatus; label: string }[] = [
   { value: 'recovering', label: 'Recovering' },
 ]
 
+// ─── species autocomplete ─────────────────────────────────────────────────────
+
+function SpeciesPicker({
+  value,
+  onSelect,
+  onChange,
+}: {
+  value: string
+  onSelect: (scientific: string, common: string) => void
+  onChange: (value: string) => void
+}) {
+  const [results, setResults] = useState<PlantSuggestion[]>([])
+  const [searching, setSearching] = useState(false)
+  const [open, setOpen] = useState(false)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value
+    onChange(val)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    if (val.trim().length < 2) { setResults([]); setOpen(false); return }
+    searchTimer.current = setTimeout(async () => {
+      setSearching(true)
+      const r = await searchPlantSpecies(val)
+      setResults(r)
+      setOpen(r.length > 0)
+      setSearching(false)
+    }, 400)
+  }
+
+  function handleBlur() {
+    blurTimer.current = setTimeout(() => setOpen(false), 200)
+  }
+
+  function handleSelect(s: PlantSuggestion) {
+    if (blurTimer.current) clearTimeout(blurTimer.current)
+    onChange(s.scientificName)
+    setOpen(false)
+    setResults([])
+    onSelect(s.scientificName, s.commonName)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        placeholder="e.g. Monstera deliciosa"
+        className="input-underline"
+        value={value}
+        onChange={handleChange}
+        onBlur={handleBlur}
+      />
+      {searching && (
+        <p className="text-[10px] text-stone-400 mt-1">Searching plants…</p>
+      )}
+      {open && results.length > 0 && (
+        <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-stone-200 rounded-xl shadow-lg overflow-hidden">
+          {results.map((s) => (
+            <button
+              key={s.scientificName}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleSelect(s)}
+              className="w-full text-left px-3 py-2.5 hover:bg-stone-100 border-b border-stone-100 last:border-0 transition-colors"
+            >
+              <p className="text-sm font-medium text-leaf-700">{s.commonName}</p>
+              <p className="text-[11px] text-stone-400 italic">{s.scientificName}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── component ───────────────────────────────────────────────────────────────
 
 export function PlantForm({ plant }: { plant?: Plant }) {
@@ -110,11 +189,16 @@ export function PlantForm({ plant }: { plant?: Plant }) {
   const [identifying, setIdentifying] = useState(false)
   const [identifyFailed, setIdentifyFailed] = useState(false)
   const [potType, setPotType] = useState<PotType | null>((plant?.pot_type as PotType | null) ?? null)
+  const [hasDrainage, setHasDrainage] = useState<boolean>(plant?.has_drainage ?? true)
+  const [speciesText, setSpeciesText] = useState(plant?.species ?? '')
+  const [pendingProfile, setPendingProfile] = useState<{ species: string; data: Awaited<ReturnType<typeof lookupCareProfile>> } | null>(null)
+  const [pendingProfileLoading, setPendingProfileLoading] = useState(false)
 
   const createPlant = useCreatePlant()
   const updatePlant = useUpdatePlant(plant?.id ?? '')
   const { uploadPhoto, uploading } = usePhotoUpload()
   const { data: existingLocations = [] } = useLocations()
+  const { data: siteLocations } = useSiteLocations()
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -138,6 +222,18 @@ export function PlantForm({ plant }: { plant?: Plant }) {
   const status = watch('status')
   const speciesValue = watch('species')
   const locationValue = watch('location')
+
+  async function handleSpeciesSelect(scientific: string, common: string) {
+    // speciesText + form field already updated by SpeciesPicker's onChange before onSelect fires
+    if (!watch('name')) setValue('name', common)
+    setPendingProfileLoading(true)
+    try {
+      const profile = await lookupCareProfile(scientific)
+      setPendingProfile(profile ? { species: scientific, data: profile } : null)
+    } finally {
+      setPendingProfileLoading(false)
+    }
+  }
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -172,6 +268,7 @@ export function PlantForm({ plant }: { plant?: Plant }) {
       if (result) {
         setValue('name', result.commonName)
         setValue('species', result.species)
+        setSpeciesText(result.species)
       } else {
         setIdentifyFailed(true)
       }
@@ -217,28 +314,77 @@ export function PlantForm({ plant }: { plant?: Plant }) {
       let temperatureMax = plant?.temperature_max ?? null
 
       if (data.species && (speciesChanged || !wateringIntervalDays)) {
-        setLookingUp(true)
-        const profile = await lookupCareProfile(data.species)
-        setLookingUp(false)
-        if (profile) {
-          wateringIntervalDays = profile.wateringIntervalDays
-          wateringSource = profile.wateringSource
-          mistingIntervalDays = profile.mistingIntervalDays
-          mistingSource = profile.mistingIntervalDays ? 'claude' : null
-          fertilizingIntervalDays = profile.fertilizingIntervalDays
-          fertilizingSource = profile.fertilizingIntervalDays ? 'claude' : null
-          lightRequirement = profile.lightRequirement
-          humidityPreference = profile.humidityPreference
-          soilType = profile.soilType
-          temperatureMin = profile.temperatureMin
-          temperatureMax = profile.temperatureMax
+        // Use cached profile if user selected from autocomplete, otherwise fetch
+        const cached = pendingProfile?.species === data.species ? pendingProfile.data : null
+        if (cached) {
+          wateringIntervalDays = cached.wateringIntervalDays
+          wateringSource = cached.wateringSource
+          mistingIntervalDays = cached.mistingIntervalDays
+          mistingSource = cached.mistingIntervalDays ? 'claude' : null
+          fertilizingIntervalDays = cached.fertilizingIntervalDays
+          fertilizingSource = cached.fertilizingIntervalDays ? 'claude' : null
+          lightRequirement = cached.lightRequirement
+          humidityPreference = cached.humidityPreference
+          soilType = cached.soilType
+          temperatureMin = cached.temperatureMin
+          temperatureMax = cached.temperatureMax
+        } else {
+          setLookingUp(true)
+          const profile = await lookupCareProfile(data.species)
+          setLookingUp(false)
+          if (profile) {
+            wateringIntervalDays = profile.wateringIntervalDays
+            wateringSource = profile.wateringSource
+            mistingIntervalDays = profile.mistingIntervalDays
+            mistingSource = profile.mistingIntervalDays ? 'claude' : null
+            fertilizingIntervalDays = profile.fertilizingIntervalDays
+            fertilizingSource = profile.fertilizingIntervalDays ? 'claude' : null
+            lightRequirement = profile.lightRequirement
+            humidityPreference = profile.humidityPreference
+            soilType = profile.soilType
+            temperatureMin = profile.temperatureMin
+            temperatureMax = profile.temperatureMax
+          }
         }
       }
+
+      // Build a partial plant object for smart interval computation
+      const geoLat = siteLocations?.find(l => l.name === (data.location?.trim() || ''))?.geo_lat ?? null
+      const plantForInterval = {
+        name: data.name,
+        species: data.species || null,
+        humidity_preference: humidityPreference,
+        light_requirement: lightRequirement,
+        pot_type: potType,
+        pot_diameter_cm: data.pot_diameter_cm ? Number(data.pot_diameter_cm) : null,
+        has_drainage: hasDrainage,
+        soil_type: soilType,
+        watering_interval_days: wateringIntervalDays,
+        fertilizing_interval_days: fertilizingIntervalDays,
+        last_repotted_at: data.last_repotted_at || null,
+      } as Plant
+      const smartWatering = computeSmartWateringInterval(plantForInterval, geoLat)
+      const fertResult = computeSmartFertilizingInterval(plantForInterval, geoLat)
+      const smartFert = fertResult && !fertResult.suspended ? fertResult.days : null
+
+      // Clear cached recommendation when care-relevant settings change
+      const careFieldsChanged = plant && (
+        speciesChanged ||
+        humidityPreference !== (plant.humidity_preference ?? null) ||
+        lightRequirement !== (plant.light_requirement ?? null) ||
+        potType !== (plant.pot_type ?? null) ||
+        hasDrainage !== (plant.has_drainage ?? true) ||
+        (data.pot_diameter_cm ? Number(data.pot_diameter_cm) : null) !== (plant.pot_diameter_cm ?? null) ||
+        (data.location?.trim() || null) !== (plant.location ?? null)
+      )
 
       // Compute next_watered_at
       let nextWateredAt: string | null = plant?.next_watered_at ?? null
       if (data.last_watered_at && wateringIntervalDays) {
-        nextWateredAt = format(addDays(parseISO(data.last_watered_at), wateringIntervalDays), 'yyyy-MM-dd')
+        nextWateredAt = format(
+          addDays(parseISO(data.last_watered_at), smartWatering ?? wateringIntervalDays),
+          'yyyy-MM-dd'
+        )
       }
 
       // Compute next_misted_at
@@ -252,7 +398,10 @@ export function PlantForm({ plant }: { plant?: Plant }) {
       // Compute next_fertilized_at (auto only — no manual entry)
       let nextFertilizedAt: string | null = plant?.next_fertilized_at ?? null
       if (data.last_fertilized_at && fertilizingIntervalDays) {
-        nextFertilizedAt = format(addDays(parseISO(data.last_fertilized_at), fertilizingIntervalDays), 'yyyy-MM-dd')
+        nextFertilizedAt = format(
+          addDays(parseISO(data.last_fertilized_at), smartFert ?? fertilizingIntervalDays),
+          'yyyy-MM-dd'
+        )
       }
 
       const payload = {
@@ -289,11 +438,12 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         pot_type: potType,
         pot_diameter_cm: data.pot_diameter_cm ? Number(data.pot_diameter_cm) : null,
         pot_height_cm: data.pot_height_cm ? Number(data.pot_height_cm) : null,
+        has_drainage: hasDrainage,
         // Misc
         last_repotted_at: data.last_repotted_at || null,
-        // Recommendation — preserved on update, null on create (generated on first open)
-        watering_recommendation: plant?.watering_recommendation ?? null,
-        watering_recommendation_updated_at: plant?.watering_recommendation_updated_at ?? null,
+        // Clear recommendation when care-relevant settings change so it regenerates
+        watering_recommendation: careFieldsChanged ? null : (plant?.watering_recommendation ?? null),
+        watering_recommendation_updated_at: careFieldsChanged ? null : (plant?.watering_recommendation_updated_at ?? null),
       }
 
       if (plant) {
@@ -423,15 +573,23 @@ export function PlantForm({ plant }: { plant?: Plant }) {
           </div>
           <div>
             <label className="label-caps">Species</label>
-            <input type="text" placeholder="e.g. Monstera deliciosa" className="input-underline" {...register('species')} />
+            <SpeciesPicker
+              value={speciesText}
+              onChange={(val) => { setSpeciesText(val); setValue('species', val) }}
+              onSelect={handleSpeciesSelect}
+            />
           </div>
         </div>
 
-        {speciesValue && (
+        {(speciesValue || pendingProfileLoading) && (
           <div className="flex items-center gap-2 text-xs text-olive-500 bg-stone-200 rounded-lg px-3 py-2">
             <Timer size={12} className="text-leaf-500 flex-shrink-0" />
             <span>
-              {plant?.watering_interval_days && speciesUnchanged
+              {pendingProfileLoading
+                ? 'Checking care profile…'
+                : pendingProfile?.species === speciesValue && pendingProfile?.data
+                ? `Water every ${pendingProfile.data.wateringIntervalDays}d · Fertilize every ${pendingProfile.data.fertilizingIntervalDays ?? '—'}d · ${pendingProfile.data.lightRequirement?.replace('_', ' ') ?? '—'} light`
+                : plant?.watering_interval_days && speciesUnchanged
                 ? `Watering every ${plant.watering_interval_days}d${plant.misting_interval_days ? ` · Misting every ${plant.misting_interval_days}d` : ''}`
                 : 'Care schedule will be auto-detected on save'}
             </span>
@@ -583,6 +741,26 @@ export function PlantForm({ plant }: { plant?: Plant }) {
               className="input-underline"
               {...register('pot_height_cm')}
             />
+          </div>
+        </div>
+
+        <div>
+          <label className="label-caps">Drainage hole</label>
+          <div className="flex gap-2 mt-2">
+            {([true, false] as const).map((val) => (
+              <button
+                key={String(val)}
+                type="button"
+                onClick={() => setHasDrainage(val)}
+                className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                  hasDrainage === val
+                    ? 'bg-leaf-500 text-stone-50 border-leaf-500'
+                    : 'bg-stone-200 border-stone-300 text-olive-500 hover:bg-stone-300'
+                }`}
+              >
+                {val ? 'Yes' : 'No'}
+              </button>
+            ))}
           </div>
         </div>
       </div>

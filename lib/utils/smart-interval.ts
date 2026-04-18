@@ -1,64 +1,163 @@
 import type { Plant } from '@/lib/types'
 
-/**
- * Reference conditions for the base watering interval:
- * plastic pot, 15 cm diameter × 15 cm height, medium light, spring (Mar–May).
- *
- * Multipliers are derived from the horticultural literature:
- *  - Pot material: controlled studies show terracotta loses ~35–45% more water
- *    than plastic; porous sidewall evaporation is measurably higher.
- *  - Pot size: water reservoir scales with volume; larger pots stay moist longer.
- *    Interval ∝ (actual_volume / ref_volume)^0.35 (damped — roots and substrate
- *    heterogeneity reduce the linearity).
- *  - Light: high light stimulates stomata, increases transpiration.
- *  - Season: daylight hours + temperature proxy for evapotranspiration demand.
- */
+// ─── archetypes ───────────────────────────────────────────────────────────────
 
-const REF_VOLUME_CM3 = Math.PI * (15 / 2) ** 2 * 15 // ~2651 cm³
+type Archetype = 'succulent' | 'regular' | 'moisture_loving'
 
-export function computeSmartWateringInterval(plant: Plant): number | null {
-  const base = plant.watering_interval_days
-  if (!base) return null
+const ARCHETYPE_CONFIG: Record<Archetype, { base: number; min: number; max: number }> = {
+  succulent:       { base: 18, min: 10, max: 45 },
+  regular:         { base: 9,  min: 4,  max: 21 },
+  moisture_loving: { base: 5,  min: 2,  max: 10 },
+}
+
+const SUCCULENT_KEYWORDS = /succulent|cactus|aloe|agave|echeveria|sedum|haworthia|jade|euphorbia|stonecrop|sempervivum/i
+const MOISTURE_KEYWORDS  = /fern|calathea|peace.?lily|anthurium|orchid|bromeliad|carnivorous|pitcher.?plant|sundew|boston.?fern|maidenhair/i
+
+function classifyArchetype(plant: Plant): Archetype {
+  if (plant.humidity_preference === 'low') return 'succulent'
+  if (plant.humidity_preference === 'high') return 'moisture_loving'
+  // keyword fallback on species, name, soil_type
+  const text = [plant.species, plant.name, plant.soil_type].filter(Boolean).join(' ')
+  if (SUCCULENT_KEYWORDS.test(text)) return 'succulent'
+  if (MOISTURE_KEYWORDS.test(text))  return 'moisture_loving'
+  return 'regular'
+}
+
+// ─── season ───────────────────────────────────────────────────────────────────
+
+function seasonMultiplier(geoLat?: number | null): number {
+  const month = new Date().getMonth() + 1 // 1–12
+  // Convert to northern-hemisphere equivalent so formula is hemisphere-agnostic
+  const isNorthern = geoLat == null || geoLat >= 0
+  const m = isNorthern ? month : ((month + 5) % 12) + 1
+  if (m === 12 || m <= 2) return 1.35  // winter: slow growth, less ET
+  if (m >= 6  && m <= 8)  return 0.85  // summer: fast growth, high ET
+  return 1.0                            // spring / autumn: reference
+}
+
+// ─── main export ─────────────────────────────────────────────────────────────
+
+export function computeSmartWateringInterval(plant: Plant, geoLat?: number | null): number | null {
+  if (!plant.watering_interval_days) return null
+
+  const { base, min, max } = ARCHETYPE_CONFIG[classifyArchetype(plant)]
 
   let f = 1.0
 
-  // ── Pot material ─────────────────────────────────────────────────────────
-  // Terracotta loses ~55–66% of the water plastic does in the same conditions,
-  // meaning it needs watering ~1.5–1.8× more often.
-  if (plant.pot_type === 'terracotta') f *= 0.65        // water ~35% more often
-  else if (plant.pot_type === 'stoneware') f *= 0.85    // slightly more porous than plastic
-  else if (plant.pot_type === 'glass')    f *= 0.97     // non-porous but similar to plastic
+  // Season (hemisphere-aware)
+  f *= seasonMultiplier(geoLat)
 
-  // ── Pot size (volume relative to 15 cm reference) ────────────────────────
-  if (plant.pot_diameter_cm && plant.pot_height_cm) {
-    const vol = Math.PI * (plant.pot_diameter_cm / 2) ** 2 * plant.pot_height_cm
-    // Larger pot → more water held → can go longer between waterings
-    f *= Math.pow(vol / REF_VOLUME_CM3, 0.35)
+  // Light
+  if (plant.light_requirement === 'direct')          f *= 0.85
+  else if (plant.light_requirement === 'low')        f *= 1.25
+
+  // Pot material
+  if (plant.pot_type === 'terracotta') f *= 0.8
+
+  // Drainage: no drainage hole → soil stays wet longer
+  if (plant.has_drainage === false) f *= 1.35
+
+  // Pot size
+  if (plant.pot_diameter_cm != null) {
+    if      (plant.pot_diameter_cm < 10) f *= 0.9
+    else if (plant.pot_diameter_cm > 20) f *= 1.1
   }
 
-  // ── Light requirement ────────────────────────────────────────────────────
-  if      (plant.light_requirement === 'low')            f *= 1.30  // less ET, water less often
-  else if (plant.light_requirement === 'bright_indirect') f *= 0.85
-  else if (plant.light_requirement === 'direct')         f *= 0.75  // high ET, water more often
-
-  // ── Season (northern-hemisphere proxy) ───────────────────────────────────
-  const month = new Date().getMonth() + 1 // 1–12
-  if      (month >= 12 || month <= 2) f *= 1.40  // winter:  low light, cool → slow ET
-  else if (month >= 6  && month <= 8) f *= 0.85  // summer:  long days, warm → fast ET
-  else if (month >= 9  && month <= 11) f *= 1.15 // autumn:  days shortening
-  // spring (3–5) → reference × 1.0
-
-  return Math.max(1, Math.round(base * f))
+  return Math.max(min, Math.min(max, Math.round(base * f)))
 }
 
-/**
- * Describes what changed from the base interval, for debug / logging.
- */
-export function describeInterval(plant: Plant): string {
-  const base = plant.watering_interval_days
-  const smart = computeSmartWateringInterval(plant)
-  if (!base || !smart) return 'no base interval'
+export function describeInterval(plant: Plant, geoLat?: number | null): string {
+  const smart = computeSmartWateringInterval(plant, geoLat)
+  if (!smart) return 'no schedule set'
+  const base = ARCHETYPE_CONFIG[classifyArchetype(plant)].base
   const pct = Math.round(((smart - base) / base) * 100)
   const dir = pct > 0 ? `+${pct}%` : `${pct}%`
-  return `${base}d base → ${smart}d adjusted (${dir})`
+  return `archetype base ${base}d → ${smart}d (${dir})`
+}
+
+// ─── fertilizing ─────────────────────────────────────────────────────────────
+
+const FERTILIZE_BASE: Record<Archetype, number> = {
+  succulent:       45,
+  regular:         21,
+  moisture_loving: 14,
+}
+
+// Season tiers for fertilizing (hemisphere-aware, same conversion as watering)
+// Active     (months 4–8):  April–August        — full growing season
+// Transition (months 3,9,10): Mar + Sep–Oct     — ramping up / winding down
+// Winter     (months 11,12,1,2): Nov–Feb        — dormancy
+type FertilizeTier = 'active' | 'transition' | 'winter'
+
+function fertilizeTier(geoLat?: number | null): FertilizeTier {
+  const month = new Date().getMonth() + 1
+  const isNorthern = geoLat == null || geoLat >= 0
+  const m = isNorthern ? month : ((month + 5) % 12) + 1
+  if (m >= 4 && m <= 8)  return 'active'
+  if (m === 3 || (m >= 9 && m <= 10)) return 'transition'
+  return 'winter'
+}
+
+function lightIsBright(plant: Plant): boolean {
+  return plant.light_requirement === 'direct' || plant.light_requirement === 'bright_indirect'
+}
+
+function fLight(plant: Plant): number {
+  if (plant.light_requirement === 'direct') return 0.85
+  if (plant.light_requirement === 'low')    return 1.4
+  return 1.0 // bright_indirect or null → reference
+}
+
+export type FertilizingSchedule =
+  | { suspended: false; days: number; tier: FertilizeTier }
+  | { suspended: true; reason: 'repotted_recently' | 'winter_low_light' }
+
+/**
+ * Returns the smart fertilizing interval, or a suspension reason.
+ * Returns null when no fertilizing schedule has been configured for the plant.
+ *
+ * Hard rules (checked before any calculation):
+ *   1. < 30 days since repotting → suspend (fresh potting mix is already rich)
+ *   2. Winter tier + non-bright light → suspend (plant is dormant)
+ *
+ * Reminder (enforced by UI, not this function):
+ *   Always fertilize after watering, never into dry soil.
+ */
+export function computeSmartFertilizingInterval(
+  plant: Plant,
+  geoLat?: number | null,
+): FertilizingSchedule | null {
+  if (!plant.fertilizing_interval_days) return null
+
+  // Hard rule 1: recent repotting
+  if (plant.last_repotted_at) {
+    const daysSince = Math.floor(
+      (Date.now() - new Date(plant.last_repotted_at).getTime()) / 86_400_000,
+    )
+    if (daysSince < 30) return { suspended: true, reason: 'repotted_recently' }
+  }
+
+  const tier = fertilizeTier(geoLat)
+  const bright = lightIsBright(plant)
+
+  // Hard rule 2: winter + non-bright light → suspend
+  if (tier === 'winter' && !bright) return { suspended: true, reason: 'winter_low_light' }
+
+  const F0 = FERTILIZE_BASE[classifyArchetype(plant)]
+  const fl = fLight(plant)
+
+  let days: number
+  if (tier === 'active') {
+    days = F0 * fl
+  } else if (tier === 'transition') {
+    days = F0 * fl * 1.5
+  } else {
+    // Winter, bright light only
+    days = F0 * fl * 1.75
+  }
+
+  // Fertilizing-specific clamps (different scale to watering)
+  const FCLAMP = { succulent: [30, 90], regular: [14, 60], moisture_loving: [10, 42] } as const
+  const [fMin, fMax] = FCLAMP[classifyArchetype(plant)]
+  return { suspended: false, days: Math.round(Math.max(fMin, Math.min(fMax, days))), tier }
 }

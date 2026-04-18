@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { format, addDays, parseISO } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
-import type { SiteLocation } from '@/lib/types'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval } from '@/lib/utils/smart-interval'
+import type { Plant, SiteLocation } from '@/lib/types'
 
 export function useSiteLocations() {
   return useQuery({
@@ -57,6 +59,43 @@ export function useUpsertLocation() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['site-locations'] })
       queryClient.invalidateQueries({ queryKey: ['site-locations', data.name] })
+    },
+  })
+}
+
+export function useReschedulePlantsAtLocation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ locationName, geoLat }: { locationName: string; geoLat: number | null }) => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error('Not authenticated')
+      const { data: plants } = await supabase
+        .from('plants')
+        .select('*')
+        .eq('location', locationName)
+        .eq('user_id', user.id)
+      if (!plants?.length) return
+      for (const plant of plants) {
+        const smart = computeSmartWateringInterval(plant as Plant, geoLat)
+        const fertResult = computeSmartFertilizingInterval(plant as Plant, geoLat)
+        const smartFert = fertResult && !fertResult.suspended ? fertResult.days : null
+        const update: Record<string, string | null> = {
+          watering_recommendation: null,
+          watering_recommendation_updated_at: null,
+        }
+        if (plant.last_watered_at && smart) {
+          update.next_watered_at = format(addDays(parseISO(plant.last_watered_at), smart), 'yyyy-MM-dd')
+        }
+        if (plant.last_fertilized_at && smartFert) {
+          update.next_fertilized_at = format(addDays(parseISO(plant.last_fertilized_at), smartFert), 'yyyy-MM-dd')
+        }
+        await supabase.from('plants').update(update).eq('id', plant.id)
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plants'] })
+      queryClient.invalidateQueries({ queryKey: ['upcoming-tasks'] })
     },
   })
 }

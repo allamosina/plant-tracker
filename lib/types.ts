@@ -40,6 +40,7 @@ export interface Plant {
   pot_type: string | null
   pot_diameter_cm: number | null
   pot_height_cm: number | null
+  has_drainage: boolean | null
   // Care profile
   light_requirement: string | null
   humidity_preference: string | null

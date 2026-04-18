@@ -20,7 +20,7 @@ import {
 import { isPast, parseISO } from 'date-fns'
 import { toast } from 'sonner'
 import { usePlants } from '@/lib/hooks/use-plants'
-import { useSiteLocation, useUpsertLocation } from '@/lib/hooks/use-locations'
+import { useSiteLocation, useUpsertLocation, useReschedulePlantsAtLocation } from '@/lib/hooks/use-locations'
 import { usePhotoUpload } from '@/lib/hooks/use-photo-upload'
 import { PlantStatusBadge } from '@/components/plants/plant-status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -194,6 +194,7 @@ export default function SiteDetailPage() {
   const { data: plants } = usePlants()
   const { data: location, isLoading: locationLoading } = useSiteLocation(siteName)
   const upsert = useUpsertLocation()
+  const reschedule = useReschedulePlantsAtLocation()
   const { uploadPhoto, uploading } = usePhotoUpload()
 
   // editing: whether the environment form is open
@@ -229,6 +230,7 @@ export default function SiteDetailPage() {
     if (!draft) return
     try {
       const geoCity = geoInput.split(',')[0].trim() || null
+      const newGeoLat = geoCity ? draft.geoLat : null
       await upsert.mutateAsync({
         name: siteName,
         location_type: draft.locationType,
@@ -238,9 +240,11 @@ export default function SiteDetailPage() {
         photo_urls: location?.photo_urls ?? [],
         geo_city: geoCity,
         geo_country: geoCity ? draft.geoCountry : null,
-        geo_lat: geoCity ? draft.geoLat : null,
+        geo_lat: newGeoLat,
         geo_lng: geoCity ? draft.geoLng : null,
       })
+      // Recalculate watering/fertilizing schedules for all plants at this location
+      reschedule.mutate({ locationName: siteName, geoLat: newGeoLat })
       setDraft(null)
       setEditing(false)
       toast.success('Settings saved')

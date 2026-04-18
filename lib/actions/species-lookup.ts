@@ -34,6 +34,42 @@ export interface CareProfile {
   temperatureMax: number | null
 }
 
+export interface PlantSuggestion {
+  scientificName: string
+  commonName: string
+}
+
+export async function searchPlantSpecies(query: string): Promise<PlantSuggestion[]> {
+  if (query.trim().length < 2) return []
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+  if (!anthropicKey) return []
+  try {
+    const client = new Anthropic({ apiKey: anthropicKey })
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      messages: [{
+        role: 'user',
+        content: `List up to 6 real houseplant or garden plant species matching "${query}".
+Reply with ONLY a valid JSON array — no markdown, no extra text:
+[{"scientificName":"Monstera deliciosa","commonName":"Swiss Cheese Plant"},...]
+Only include real species. If nothing matches, return [].`,
+      }],
+    })
+    const text = (msg.content[0] as { type: 'text'; text: string }).text.trim()
+    const jsonStr = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+    const parsed = JSON.parse(jsonStr)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((p): p is PlantSuggestion =>
+        typeof p?.scientificName === 'string' && typeof p?.commonName === 'string'
+      )
+      .slice(0, 6)
+  } catch {
+    return []
+  }
+}
+
 export async function lookupCareProfile(species: string): Promise<CareProfile | null> {
   let perenualData: Partial<CareProfile> | null = null
 
