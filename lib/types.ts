@@ -95,6 +95,10 @@ export interface SiteLocation {
   light_level: string | null  // low | medium | bright_indirect | direct
   humidity: string | null     // low | medium | high
   notes: string | null
+  geo_city: string | null
+  geo_country: string | null
+  geo_lat: number | null
+  geo_lng: number | null
   photo_urls: string[]
   created_at: string
   updated_at: string

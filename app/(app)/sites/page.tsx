@@ -244,6 +244,11 @@ function SiteCard({
             <span className="ml-1.5 text-clay-500 font-medium">· {overdue} overdue</span>
           )}
         </p>
+        {location?.geo_city && (
+          <p className="text-[10px] text-stone-400 mt-0.5">
+            📍 {location.geo_city}{location.geo_country ? `, ${location.geo_country}` : ''}
+          </p>
+        )}
         {(location?.light_level || location?.humidity) && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {location.light_level && (

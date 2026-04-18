@@ -9,8 +9,11 @@ import {
   Camera,
   Droplets,
   FileText,
+  Globe,
+  LocateFixed,
   MapPin,
   Pencil,
+  Search,
   Sun,
   X,
 } from 'lucide-react'
@@ -47,6 +50,129 @@ const HUMIDITY_OPTIONS = [
   { value: 'high', label: 'High', sub: 'tropical' },
 ] as const
 
+// ─── nominatim city search ────────────────────────────────────────────────────
+
+interface NominatimResult {
+  display_name: string
+  lat: string
+  lon: string
+  address: {
+    city?: string
+    town?: string
+    village?: string
+    municipality?: string
+    suburb?: string
+    county?: string
+    country?: string
+  }
+}
+
+function extractCityName(r: NominatimResult): string {
+  return (
+    r.address.city ||
+    r.address.town ||
+    r.address.village ||
+    r.address.municipality ||
+    r.address.suburb ||
+    r.address.county ||
+    r.display_name.split(',')[0]
+  )
+}
+
+interface CityPickerProps {
+  value: string
+  onUserInput: (v: string) => void
+  onSelect: (city: string, country: string, lat: number, lng: number) => void
+  onClear: () => void
+}
+
+function CityPicker({ value, onUserInput, onSelect, onClear }: CityPickerProps) {
+  const [results, setResults] = useState<NominatimResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [open, setOpen] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const blurRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function handleInput(q: string) {
+    onUserInput(q)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (q.length < 2) { setResults([]); setOpen(false); return }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=6`,
+          { headers: { 'Accept-Language': 'en' } }
+        )
+        const data: NominatimResult[] = await res.json()
+        setResults(data)
+        setOpen(data.length > 0)
+      } catch {
+        // silently fail — user can still type manually
+      } finally {
+        setSearching(false)
+      }
+    }, 350)
+  }
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+        <input
+          value={value}
+          onChange={(e) => handleInput(e.target.value)}
+          onFocus={() => {
+            if (blurRef.current) clearTimeout(blurRef.current)
+            if (results.length > 0) setOpen(true)
+          }}
+          onBlur={() => {
+            blurRef.current = setTimeout(() => setOpen(false), 200)
+          }}
+          placeholder="Search for a city…"
+          className="w-full text-sm rounded-lg border border-stone-300 bg-stone-50 pl-8 pr-8 py-2 text-leaf-700 placeholder:text-stone-400 focus:outline-none focus:border-leaf-400"
+        />
+        {searching ? (
+          <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full border-2 border-leaf-400 border-t-transparent animate-spin" />
+        ) : value ? (
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onClear}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 transition-colors"
+          >
+            <X size={13} />
+          </button>
+        ) : null}
+      </div>
+      {open && results.length > 0 && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-stone-50 rounded-xl border border-stone-200 shadow-xl overflow-hidden">
+          {results.map((r, i) => {
+            const city = extractCityName(r)
+            const country = r.address.country
+            return (
+              <button
+                key={i}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onSelect(city, country ?? '', parseFloat(r.lat), parseFloat(r.lon))
+                  setOpen(false)
+                }}
+                className="w-full text-left px-4 py-2.5 hover:bg-stone-100 border-b border-stone-100 last:border-0 flex items-baseline gap-2"
+              >
+                <span className="text-sm font-medium text-leaf-700 truncate">{city}</span>
+                {country && <span className="text-[11px] text-stone-400 flex-shrink-0">{country}</span>}
+              </button>
+            )
+          })}
+          <p className="text-[9px] text-stone-400 px-4 py-1.5 text-right border-t border-stone-200">
+            © OpenStreetMap contributors
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 interface Draft {
@@ -54,6 +180,9 @@ interface Draft {
   lightLevel: string | null
   humidity: string | null
   notes: string
+  geoCountry: string | null
+  geoLat: number | null
+  geoLng: number | null
 }
 
 export default function SiteDetailPage() {
@@ -71,6 +200,9 @@ export default function SiteDetailPage() {
   // draft: snapshot of editable fields (null when not editing)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
+  // geoInput: the text shown in the city search box (separate from structured draft geo)
+  const [geoInput, setGeoInput] = useState('')
+  const [detecting, setDetecting] = useState(false)
 
   const photoInputRef = useRef<HTMLInputElement>(null)
 
@@ -83,13 +215,20 @@ export default function SiteDetailPage() {
       lightLevel: location?.light_level ?? null,
       humidity: location?.humidity ?? null,
       notes: location?.notes ?? '',
+      geoCountry: location?.geo_country ?? null,
+      geoLat: location?.geo_lat ?? null,
+      geoLng: location?.geo_lng ?? null,
     })
+    const city = location?.geo_city ?? ''
+    const country = location?.geo_country ?? ''
+    setGeoInput(city ? (country ? `${city}, ${country}` : city) : '')
     setEditing(true)
   }
 
   async function handleSave() {
     if (!draft) return
     try {
+      const geoCity = geoInput.split(',')[0].trim() || null
       await upsert.mutateAsync({
         name: siteName,
         location_type: draft.locationType,
@@ -97,6 +236,10 @@ export default function SiteDetailPage() {
         humidity: draft.humidity,
         notes: draft.notes.trim() || null,
         photo_urls: location?.photo_urls ?? [],
+        geo_city: geoCity,
+        geo_country: geoCity ? draft.geoCountry : null,
+        geo_lat: geoCity ? draft.geoLat : null,
+        geo_lng: geoCity ? draft.geoLng : null,
       })
       setDraft(null)
       setEditing(false)
@@ -119,6 +262,10 @@ export default function SiteDetailPage() {
         light_level: location?.light_level ?? null,
         humidity: location?.humidity ?? null,
         notes: location?.notes ?? null,
+        geo_city: location?.geo_city ?? null,
+        geo_country: location?.geo_country ?? null,
+        geo_lat: location?.geo_lat ?? null,
+        geo_lng: location?.geo_lng ?? null,
       })
       toast.success('Photo added')
     } catch {
@@ -136,11 +283,59 @@ export default function SiteDetailPage() {
         light_level: location?.light_level ?? null,
         humidity: location?.humidity ?? null,
         notes: location?.notes ?? null,
+        geo_city: location?.geo_city ?? null,
+        geo_country: location?.geo_country ?? null,
+        geo_lat: location?.geo_lat ?? null,
+        geo_lng: location?.geo_lng ?? null,
       })
       toast.success('Photo removed')
     } catch {
       toast.error('Failed to remove photo')
     }
+  }
+
+  async function detectLocation() {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation not supported by your browser')
+      return
+    }
+    setDetecting(true)
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords: { latitude, longitude } }) => {
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            { headers: { 'Accept-Language': 'en' } }
+          )
+          const data = await res.json()
+          const city =
+            data.address?.city ||
+            data.address?.town ||
+            data.address?.village ||
+            data.address?.municipality ||
+            ''
+          const country = data.address?.country || ''
+          if (city) {
+            setGeoInput(`${city}${country ? `, ${country}` : ''}`)
+            setDraft((d) => d && { ...d, geoCountry: country || null, geoLat: latitude, geoLng: longitude })
+          } else {
+            toast.error('Could not determine city from your location')
+          }
+        } catch {
+          toast.error('Reverse geocoding failed')
+        } finally {
+          setDetecting(false)
+        }
+      },
+      (err) => {
+        toast.error(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location access denied — search manually instead'
+            : 'Could not get your location'
+        )
+        setDetecting(false)
+      }
+    )
   }
 
   const overdueCount = sitePlants.filter(
@@ -278,6 +473,67 @@ export default function SiteDetailPage() {
                     const opt = LOCATION_TYPE_OPTIONS.find((o) => o.value === location.location_type)
                     return opt ? `${opt.emoji} ${opt.label}` : location.location_type
                   })()
+                ) : (
+                  <span className="text-stone-400 italic">Not set</span>
+                )}
+              </p>
+            )}
+          </div>
+
+          {/* City / geography */}
+          <div>
+            <p className="text-xs text-stone-500 mb-2 flex items-center gap-1.5">
+              <Globe size={12} className="text-leaf-500" /> City
+            </p>
+            {editing && draft ? (
+              <div className="space-y-2">
+                <button
+                  onClick={detectLocation}
+                  disabled={detecting}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-stone-300 bg-stone-50 text-stone-500 hover:border-leaf-400 hover:text-leaf-600 transition-colors disabled:opacity-50"
+                >
+                  {detecting ? (
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-leaf-400 border-t-transparent animate-spin" />
+                  ) : (
+                    <LocateFixed size={13} />
+                  )}
+                  {detecting ? 'Detecting…' : 'Use my location'}
+                </button>
+                <CityPicker
+                  value={geoInput}
+                  onUserInput={(v) => {
+                    setGeoInput(v)
+                    setDraft((d) => d && { ...d, geoCountry: null, geoLat: null, geoLng: null })
+                  }}
+                  onSelect={(city, country, lat, lng) => {
+                    setGeoInput(`${city}${country ? `, ${country}` : ''}`)
+                    setDraft((d) => d && { ...d, geoCountry: country || null, geoLat: lat, geoLng: lng })
+                  }}
+                  onClear={() => {
+                    setGeoInput('')
+                    setDraft((d) => d && { ...d, geoCountry: null, geoLat: null, geoLng: null })
+                  }}
+                />
+                {draft.geoLat && draft.geoLng && (
+                  <p className="text-[10px] text-stone-400 flex items-center gap-1">
+                    <MapPin size={9} />
+                    {draft.geoLat.toFixed(4)}°, {draft.geoLng.toFixed(4)}° — coordinates saved for weather recommendations
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-leaf-700">
+                {location?.geo_city ? (
+                  <span className="flex items-center gap-1.5">
+                    <MapPin size={13} className="text-leaf-400 flex-shrink-0" />
+                    {location.geo_city}
+                    {location.geo_country && `, ${location.geo_country}`}
+                    {location.geo_lat && (
+                      <span className="text-[10px] text-stone-400 ml-1">
+                        ({location.geo_lat.toFixed(2)}°, {location.geo_lng?.toFixed(2)}°)
+                      </span>
+                    )}
+                  </span>
                 ) : (
                   <span className="text-stone-400 italic">Not set</span>
                 )}
