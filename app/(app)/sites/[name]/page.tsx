@@ -9,6 +9,7 @@ import {
   Camera,
   Droplets,
   FileText,
+  MapPin,
   Pencil,
   Sun,
   X,
@@ -20,8 +21,18 @@ import { useSiteLocation, useUpsertLocation } from '@/lib/hooks/use-locations'
 import { usePhotoUpload } from '@/lib/hooks/use-photo-upload'
 import { PlantStatusBadge } from '@/components/plants/plant-status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { LocationType } from '@/lib/types'
 
 // ─── constants ───────────────────────────────────────────────────────────────
+
+const LOCATION_TYPE_OPTIONS = [
+  { value: 'indoor_home',    label: 'Indoor home',    emoji: '🏠' },
+  { value: 'greenhouse',     label: 'Greenhouse',     emoji: '🌡️' },
+  { value: 'outdoor_garden', label: 'Garden',         emoji: '🌳' },
+  { value: 'balcony_patio',  label: 'Balcony / patio', emoji: '🏡' },
+  { value: 'office',         label: 'Office',         emoji: '💼' },
+  { value: 'other',          label: 'Other',          emoji: '📍' },
+] as const
 
 const LIGHT_OPTIONS = [
   { value: 'low', label: 'Low', emoji: '🌑' },
@@ -39,6 +50,7 @@ const HUMIDITY_OPTIONS = [
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 interface Draft {
+  locationType: LocationType | null
   lightLevel: string | null
   humidity: string | null
   notes: string
@@ -67,6 +79,7 @@ export default function SiteDetailPage() {
 
   function startEdit() {
     setDraft({
+      locationType: location?.location_type ?? null,
       lightLevel: location?.light_level ?? null,
       humidity: location?.humidity ?? null,
       notes: location?.notes ?? '',
@@ -79,6 +92,7 @@ export default function SiteDetailPage() {
     try {
       await upsert.mutateAsync({
         name: siteName,
+        location_type: draft.locationType,
         light_level: draft.lightLevel,
         humidity: draft.humidity,
         notes: draft.notes.trim() || null,
@@ -101,6 +115,7 @@ export default function SiteDetailPage() {
       await upsert.mutateAsync({
         name: siteName,
         photo_urls: [...photos, url],
+        location_type: location?.location_type ?? null,
         light_level: location?.light_level ?? null,
         humidity: location?.humidity ?? null,
         notes: location?.notes ?? null,
@@ -117,6 +132,7 @@ export default function SiteDetailPage() {
       await upsert.mutateAsync({
         name: siteName,
         photo_urls: photos.filter((u) => u !== url),
+        location_type: location?.location_type ?? null,
         light_level: location?.light_level ?? null,
         humidity: location?.humidity ?? null,
         notes: location?.notes ?? null,
@@ -231,6 +247,43 @@ export default function SiteDetailPage() {
           <h2 className="text-xs font-semibold text-stone-500 uppercase tracking-widest">
             Environment
           </h2>
+
+          {/* Location type */}
+          <div>
+            <p className="text-xs text-stone-500 mb-2 flex items-center gap-1.5">
+              <MapPin size={12} className="text-leaf-500" /> Location type
+            </p>
+            {editing && draft ? (
+              <div className="flex flex-wrap gap-2">
+                {LOCATION_TYPE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() =>
+                      setDraft((d) => d && { ...d, locationType: d.locationType === opt.value ? null : opt.value })
+                    }
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                      draft.locationType === opt.value
+                        ? 'bg-leaf-500/10 border-leaf-400 text-leaf-700'
+                        : 'bg-stone-50 border-stone-300 text-stone-500 hover:border-leaf-300'
+                    }`}
+                  >
+                    {opt.emoji} {opt.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-leaf-700">
+                {location?.location_type ? (
+                  (() => {
+                    const opt = LOCATION_TYPE_OPTIONS.find((o) => o.value === location.location_type)
+                    return opt ? `${opt.emoji} ${opt.label}` : location.location_type
+                  })()
+                ) : (
+                  <span className="text-stone-400 italic">Not set</span>
+                )}
+              </p>
+            )}
+          </div>
 
           {/* Light */}
           <div>

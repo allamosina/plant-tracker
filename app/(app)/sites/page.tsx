@@ -51,6 +51,24 @@ function PlantMosaic({ plants }: { plants: Plant[] }) {
 
 // ─── env tags ────────────────────────────────────────────────────────────────
 
+const LOCATION_TYPE_EMOJI: Record<string, string> = {
+  indoor_home:    '🏠',
+  greenhouse:     '🌡️',
+  outdoor_garden: '🌳',
+  balcony_patio:  '🏡',
+  office:         '💼',
+  other:          '📍',
+}
+
+const LOCATION_TYPE_LABEL: Record<string, string> = {
+  indoor_home:    'Indoor home',
+  greenhouse:     'Greenhouse',
+  outdoor_garden: 'Garden',
+  balcony_patio:  'Balcony / patio',
+  office:         'Office',
+  other:          'Other',
+}
+
 const LIGHT_LABELS: Record<string, string> = {
   low: 'Low light',
   medium: 'Medium light',
@@ -209,9 +227,17 @@ function SiteCard({
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 mb-0.5">
-          <MapPin size={12} className="text-stone-400 flex-shrink-0" />
+          {location?.location_type
+            ? <span className="text-sm leading-none flex-shrink-0">{LOCATION_TYPE_EMOJI[location.location_type]}</span>
+            : <MapPin size={12} className="text-stone-400 flex-shrink-0" />
+          }
           <h3 className="text-sm font-semibold text-leaf-700 truncate">{name}</h3>
         </div>
+        {location?.location_type && (
+          <p className="text-[10px] text-stone-400 mb-0.5">
+            {LOCATION_TYPE_LABEL[location.location_type]}
+          </p>
+        )}
         <p className="text-[11px] text-stone-500">
           {plants.length} {plants.length === 1 ? 'plant' : 'plants'}
           {overdue > 0 && (

@@ -79,10 +79,19 @@ export interface UpcomingTask {
   dueDate: string // YYYY-MM-DD
 }
 
+export type LocationType =
+  | 'indoor_home'
+  | 'greenhouse'
+  | 'outdoor_garden'
+  | 'balcony_patio'
+  | 'office'
+  | 'other'
+
 export interface SiteLocation {
   id: string
   user_id: string
   name: string
+  location_type: LocationType | null
   light_level: string | null  // low | medium | bright_indirect | direct
   humidity: string | null     // low | medium | high
   notes: string | null
