@@ -75,6 +75,45 @@ export function describeInterval(plant: Plant, geoLat?: number | null): string {
   return `archetype base ${base}d → ${smart}d (${dir})`
 }
 
+// ─── misting ─────────────────────────────────────────────────────────────────
+
+const MISTING_INTERVALS: Partial<Record<Archetype, number>> = {
+  moisture_loving: 2,  // every 1–2 days
+  regular:         7,  // once a week
+  // succulents: never
+}
+
+/**
+ * Returns the misting interval (days) when all three conditions are met:
+ *   1. Plant is not a succulent
+ *   2. Ambient humidity is not high (low or medium, or unknown)
+ *   3. Effective light level is not low
+ *
+ * Returns null when misting should be off.
+ *
+ * locationHumidity / locationLightLevel come from the site location record.
+ * If not set, the function falls back to the plant's own preference fields.
+ */
+export function computeSmartMistingInterval(
+  plant: Plant,
+  locationHumidity?: string | null,
+  locationLightLevel?: string | null,
+): number | null {
+  // Rule 1: succulents don't benefit from misting
+  if (classifyArchetype(plant) === 'succulent') return null
+
+  // Rule 2: high ambient humidity → already moist enough
+  const humidity = locationHumidity ?? null
+  if (humidity === 'high') return null
+
+  // Rule 3: low light → low transpiration, misting not needed
+  const light = locationLightLevel ?? plant.light_requirement
+  if (light === 'low') return null
+
+  const archetype = classifyArchetype(plant)
+  return MISTING_INTERVALS[archetype] ?? null
+}
+
 // ─── post-repot watering delay ────────────────────────────────────────────────
 
 // Days after repotting before the first watering, per archetype:

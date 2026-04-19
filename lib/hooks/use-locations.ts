@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { format, addDays, parseISO } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
-import { computeSmartWateringInterval, computeSmartFertilizingInterval, computePostRepotWateringDelay } from '@/lib/utils/smart-interval'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval, computeSmartMistingInterval, computePostRepotWateringDelay } from '@/lib/utils/smart-interval'
 import type { Plant, SiteLocation } from '@/lib/types'
 
 export function useSiteLocations() {
@@ -66,7 +66,7 @@ export function useUpsertLocation() {
 export function useReschedulePlantsAtLocation() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ locationName, geoLat }: { locationName: string; geoLat: number | null }) => {
+    mutationFn: async ({ locationName, geoLat, humidity, lightLevel }: { locationName: string; geoLat: number | null; humidity: string | null; lightLevel: string | null }) => {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
@@ -80,7 +80,7 @@ export function useReschedulePlantsAtLocation() {
         const smart = computeSmartWateringInterval(plant as Plant, geoLat)
         const fertResult = computeSmartFertilizingInterval(plant as Plant, geoLat)
         const smartFert = fertResult && !fertResult.suspended ? fertResult.days : null
-        const update: Record<string, string | null> = {
+        const update: Record<string, string | number | null> = {
           watering_recommendation: null,
           watering_recommendation_updated_at: null,
         }
@@ -97,6 +97,15 @@ export function useReschedulePlantsAtLocation() {
         if (plant.last_fertilized_at && smartFert) {
           update.next_fertilized_at = format(addDays(parseISO(plant.last_fertilized_at), smartFert), 'yyyy-MM-dd')
         }
+        // Misting
+        const smartMisting = computeSmartMistingInterval(plant as Plant, humidity, lightLevel)
+        update.misting_interval_days = smartMisting
+        update.misting_source = smartMisting ? 'formula' : null
+        update.next_misted_at = smartMisting && plant.last_misted_at
+          ? format(addDays(parseISO(plant.last_misted_at), smartMisting), 'yyyy-MM-dd')
+          : smartMisting
+          ? format(addDays(new Date(), smartMisting), 'yyyy-MM-dd')
+          : null
         await supabase.from('plants').update(update).eq('id', plant.id)
       }
     },

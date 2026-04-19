@@ -244,7 +244,7 @@ export default function SiteDetailPage() {
         geo_lng: geoCity ? draft.geoLng : null,
       })
       // Recalculate watering/fertilizing schedules for all plants at this location
-      reschedule.mutate({ locationName: siteName, geoLat: newGeoLat })
+      reschedule.mutate({ locationName: siteName, geoLat: newGeoLat, humidity: draft.humidity, lightLevel: draft.lightLevel })
       setDraft(null)
       setEditing(false)
       toast.success('Settings saved')

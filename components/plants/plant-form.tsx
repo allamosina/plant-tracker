@@ -13,7 +13,7 @@ import { useSiteLocations } from '@/lib/hooks/use-locations'
 import { usePhotoUpload } from '@/lib/hooks/use-photo-upload'
 import { lookupCareProfile, searchPlantSpecies } from '@/lib/actions/species-lookup'
 import type { PlantSuggestion } from '@/lib/actions/species-lookup'
-import { computeSmartWateringInterval, computeSmartFertilizingInterval, computePostRepotWateringDelay } from '@/lib/utils/smart-interval'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval, computeSmartMistingInterval, computePostRepotWateringDelay } from '@/lib/utils/smart-interval'
 import { identifyPlantFromPhoto } from '@/lib/actions/identify-plant'
 import type { Plant, PlantStatus } from '@/lib/types'
 
@@ -350,7 +350,10 @@ export function PlantForm({ plant }: { plant?: Plant }) {
       }
 
       // Build a partial plant object for smart interval computation
-      const geoLat = siteLocations?.find(l => l.name === (data.location?.trim() || ''))?.geo_lat ?? null
+      const locationData = siteLocations?.find(l => l.name === (data.location?.trim() || ''))
+      const geoLat = locationData?.geo_lat ?? null
+      const locationHumidity = locationData?.humidity ?? null
+      const locationLightLevel = locationData?.light_level ?? null
       const plantForInterval = {
         name: data.name,
         species: data.species || null,
@@ -368,6 +371,10 @@ export function PlantForm({ plant }: { plant?: Plant }) {
       const smartWatering = computeSmartWateringInterval(plantForInterval, geoLat)
       const fertResult = computeSmartFertilizingInterval(plantForInterval, geoLat)
       const smartFert = fertResult && !fertResult.suspended ? fertResult.days : null
+      // Misting formula is authoritative — overrides whatever the species lookup returned
+      const smartMisting = computeSmartMistingInterval(plantForInterval, locationHumidity, locationLightLevel)
+      mistingIntervalDays = smartMisting
+      mistingSource = smartMisting ? 'formula' : null
 
       // Clear cached recommendation when care-relevant settings change
       const careFieldsChanged = plant && (
@@ -395,12 +402,14 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         if (!nextWateredAt || repotBasedDate > nextWateredAt) nextWateredAt = repotBasedDate
       }
 
-      // Compute next_misted_at
-      let nextMistedAt: string | null = plant?.next_misted_at ?? null
-      if (data.last_misted_at && mistingIntervalDays) {
-        nextMistedAt = format(addDays(parseISO(data.last_misted_at), mistingIntervalDays), 'yyyy-MM-dd')
-      } else if (mistingIntervalDays && !nextMistedAt) {
-        nextMistedAt = format(addDays(new Date(), mistingIntervalDays), 'yyyy-MM-dd')
+      // Compute next_misted_at (null when formula disables misting)
+      let nextMistedAt: string | null = null
+      if (mistingIntervalDays) {
+        if (data.last_misted_at) {
+          nextMistedAt = format(addDays(parseISO(data.last_misted_at), mistingIntervalDays), 'yyyy-MM-dd')
+        } else {
+          nextMistedAt = format(addDays(new Date(), mistingIntervalDays), 'yyyy-MM-dd')
+        }
       }
 
       // Compute next_fertilized_at (auto only — no manual entry)
