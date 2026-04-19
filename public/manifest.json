@@ -1,6 +1,6 @@
 {
-  "name": "Plant Tracker",
-  "short_name": "Plants",
+  "name": "LeafLog",
+  "short_name": "LeafLog",
   "description": "Track your plant care",
   "start_url": "/",
   "display": "standalone",

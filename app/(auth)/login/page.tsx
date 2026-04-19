@@ -37,7 +37,7 @@ export default function LoginPage() {
         <div className="inline-flex items-center justify-center w-14 h-14 bg-leaf-500/10 rounded-full mb-4">
           <Leaf className="text-leaf-500" size={28} />
         </div>
-        <h1 className="text-2xl font-medium text-leaf-700">Plantwise</h1>
+        <h1 className="text-2xl font-medium text-leaf-700">LeafLog</h1>
         <p className="text-olive-500 text-sm mt-1">Sign in to your plant collection</p>
       </div>
 

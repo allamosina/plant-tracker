@@ -376,7 +376,7 @@ function NoPlants() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[55vh] text-center px-8">
       <div className="text-5xl mb-5">🌱</div>
-      <h2 className="text-lg font-medium text-leaf-700 mb-2">Welcome to Plantwise</h2>
+      <h2 className="text-lg font-medium text-leaf-700 mb-2">Welcome to LeafLog</h2>
       <p className="text-sm text-olive-500 mb-6">Add your first plant to start tracking care tasks.</p>
       <Link
         href="/plants/new"

@@ -14,13 +14,13 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Plant Tracker',
+  title: 'LeafLog',
   description: 'Track your plant care',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Plant Tracker',
+    title: 'LeafLog',
   },
 }
 
