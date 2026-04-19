@@ -8,6 +8,7 @@ interface PlantInput {
   pot_type: string | null
   pot_diameter_cm: number | null
   pot_height_cm: number | null
+  has_drainage: boolean | null
   light_requirement: string | null
   humidity_preference: string | null
   soil_type: string | null
@@ -40,12 +41,25 @@ export async function generateWateringRecommendation(
     volumeHint = `Pot volume ≈ ${Math.round(vol)} cm³ (aim for roughly ${ml} ml per watering as a starting point).`
   }
 
+  const drainageNote =
+    plant.has_drainage === false
+      ? 'IMPORTANT: pot has NO drainage hole — water very sparingly in small amounts to avoid root rot; never let water pool at the bottom.'
+      : plant.has_drainage === true
+      ? 'Pot has a drainage hole — water thoroughly until it runs out the bottom.'
+      : null
+
+  const potTypeNote =
+    plant.pot_type === 'terracotta'
+      ? 'Terracotta is porous — soil dries significantly faster than in plastic; check moisture more often.'
+      : plant.pot_type === 'tray'
+      ? 'Tray/window box: shallow profile means soil dries quickly and evenly; check daily in warm weather or outdoors.'
+      : null
+
   const context = [
     plant.species ? `Species: ${plant.species}` : `Plant: ${plant.name}`,
     potDesc ? `Pot: ${potDesc}` : null,
-    plant.pot_type === 'terracotta'
-      ? 'Note: terracotta is porous — it dries significantly faster than plastic.'
-      : null,
+    drainageNote,
+    potTypeNote,
     plant.light_requirement ? `Light: ${plant.light_requirement.replace('_', ' ')}` : null,
     plant.humidity_preference ? `Humidity preference: ${plant.humidity_preference}` : null,
     plant.soil_type ? `Soil: ${plant.soil_type}` : null,

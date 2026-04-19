@@ -87,6 +87,7 @@ function WateringSheet({
       pot_type: plant.pot_type,
       pot_diameter_cm: plant.pot_diameter_cm,
       pot_height_cm: plant.pot_height_cm,
+      has_drainage: plant.has_drainage,
       light_requirement: plant.light_requirement,
       humidity_preference: plant.humidity_preference,
       soil_type: plant.soil_type,

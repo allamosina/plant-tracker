@@ -13,7 +13,7 @@ import { useSiteLocations } from '@/lib/hooks/use-locations'
 import { usePhotoUpload } from '@/lib/hooks/use-photo-upload'
 import { lookupCareProfile, searchPlantSpecies } from '@/lib/actions/species-lookup'
 import type { PlantSuggestion } from '@/lib/actions/species-lookup'
-import { computeSmartWateringInterval, computeSmartFertilizingInterval } from '@/lib/utils/smart-interval'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval, computePostRepotWateringDelay } from '@/lib/utils/smart-interval'
 import { identifyPlantFromPhoto } from '@/lib/actions/identify-plant'
 import type { Plant, PlantStatus } from '@/lib/types'
 
@@ -63,7 +63,7 @@ async function resizeAndEncode(
 
 // ─── pot types ───────────────────────────────────────────────────────────────
 
-const POT_TYPES = ['plastic', 'terracotta', 'stoneware', 'glass', 'other'] as const
+const POT_TYPES = ['plastic', 'terracotta', 'stoneware', 'glass', 'tray', 'other'] as const
 type PotType = typeof POT_TYPES[number]
 
 const POT_LABELS: Record<PotType, string> = {
@@ -71,6 +71,7 @@ const POT_LABELS: Record<PotType, string> = {
   terracotta: 'Terracotta',
   stoneware: 'Stoneware',
   glass: 'Glass',
+  tray: 'Tray / window box',
   other: 'Other',
 }
 
@@ -361,6 +362,7 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         soil_type: soilType,
         watering_interval_days: wateringIntervalDays,
         fertilizing_interval_days: fertilizingIntervalDays,
+        last_watered_at: data.last_watered_at || null,
         last_repotted_at: data.last_repotted_at || null,
       } as Plant
       const smartWatering = computeSmartWateringInterval(plantForInterval, geoLat)
@@ -385,6 +387,12 @@ export function PlantForm({ plant }: { plant?: Plant }) {
           addDays(parseISO(data.last_watered_at), smartWatering ?? wateringIntervalDays),
           'yyyy-MM-dd'
         )
+      }
+      // Post-repot delay: push next watering to repot_date + delay if that's later
+      const postRepotDelay = computePostRepotWateringDelay(plantForInterval)
+      if (postRepotDelay !== null && data.last_repotted_at) {
+        const repotBasedDate = format(addDays(parseISO(data.last_repotted_at), postRepotDelay), 'yyyy-MM-dd')
+        if (!nextWateredAt || repotBasedDate > nextWateredAt) nextWateredAt = repotBasedDate
       }
 
       // Compute next_misted_at

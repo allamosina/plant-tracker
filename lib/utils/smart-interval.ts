@@ -75,6 +75,38 @@ export function describeInterval(plant: Plant, geoLat?: number | null): string {
   return `archetype base ${base}d → ${smart}d (${dir})`
 }
 
+// ─── post-repot watering delay ────────────────────────────────────────────────
+
+// Days after repotting before the first watering, per archetype:
+//   succulent:       7d — damaged roots must callous before moisture hits them
+//   regular:         2d — brief sealing period for any root breaks
+//   moisture_loving: 1d — high transpiration; can't tolerate longer dryness
+const POST_REPOT_WATERING_DELAY: Record<Archetype, number> = {
+  succulent:       7,
+  regular:         2,
+  moisture_loving: 1,
+}
+
+/**
+ * Returns the number of days after repotting before the first watering,
+ * or null if the rule does not apply (no repot data, already watered after
+ * repotting, or the delay window has already passed).
+ *
+ * When non-null, next_watered_at should be max(interval-based, repot_date + delay).
+ */
+export function computePostRepotWateringDelay(plant: Plant): number | null {
+  if (!plant.last_repotted_at) return null
+  // Already watered after repotting — delay has been served
+  if (plant.last_watered_at && plant.last_watered_at >= plant.last_repotted_at) return null
+  const delay = POST_REPOT_WATERING_DELAY[classifyArchetype(plant)]
+  const daysSinceRepot = Math.floor(
+    (Date.now() - new Date(plant.last_repotted_at).getTime()) / 86_400_000,
+  )
+  // Delay window already passed — don't push the date further out
+  if (daysSinceRepot >= delay) return null
+  return delay
+}
+
 // ─── fertilizing ─────────────────────────────────────────────────────────────
 
 const FERTILIZE_BASE: Record<Archetype, number> = {

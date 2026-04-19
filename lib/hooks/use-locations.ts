@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { format, addDays, parseISO } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
-import { computeSmartWateringInterval, computeSmartFertilizingInterval } from '@/lib/utils/smart-interval'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval, computePostRepotWateringDelay } from '@/lib/utils/smart-interval'
 import type { Plant, SiteLocation } from '@/lib/types'
 
 export function useSiteLocations() {
@@ -84,9 +84,16 @@ export function useReschedulePlantsAtLocation() {
           watering_recommendation: null,
           watering_recommendation_updated_at: null,
         }
+        let nextWatered: string | null = null
         if (plant.last_watered_at && smart) {
-          update.next_watered_at = format(addDays(parseISO(plant.last_watered_at), smart), 'yyyy-MM-dd')
+          nextWatered = format(addDays(parseISO(plant.last_watered_at), smart), 'yyyy-MM-dd')
         }
+        const postRepotDelay = computePostRepotWateringDelay(plant as Plant)
+        if (postRepotDelay !== null && plant.last_repotted_at) {
+          const repotBased = format(addDays(parseISO(plant.last_repotted_at), postRepotDelay), 'yyyy-MM-dd')
+          if (!nextWatered || repotBased > nextWatered) nextWatered = repotBased
+        }
+        if (nextWatered) update.next_watered_at = nextWatered
         if (plant.last_fertilized_at && smartFert) {
           update.next_fertilized_at = format(addDays(parseISO(plant.last_fertilized_at), smartFert), 'yyyy-MM-dd')
         }
