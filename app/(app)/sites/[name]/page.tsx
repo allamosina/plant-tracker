@@ -187,8 +187,7 @@ interface Draft {
 
 export default function SiteDetailPage() {
   const params = useParams<{ name: string }>()
-  // Next.js App Router URL-decodes dynamic segments automatically
-  const siteName = params.name
+  const siteName = decodeURIComponent(params.name)
 
   const router = useRouter()
   const { data: plants } = usePlants()
