@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -11,24 +11,24 @@ import {
 import {
   Edit2, MoreVertical, MapPin, Calendar, Archive, Trash2,
   Droplets, Sprout, Wind, CheckCircle2, Sun, Thermometer,
-  Leaf,
+  Leaf, Pencil,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Header } from '@/components/layout/header'
-import { usePlant, useArchivePlant, useDeletePlant } from '@/lib/hooks/use-plants'
+import { usePlant, useArchivePlant, useDeletePlant, useUpdatePlant } from '@/lib/hooks/use-plants'
+import { useSiteLocations } from '@/lib/hooks/use-locations'
 import { useLogs, useCreateLog } from '@/lib/hooks/use-logs'
 import { PlantStatusBadge } from '@/components/plants/plant-status-badge'
 import { AddLogSheet } from '@/components/logs/add-log-sheet'
 import { LogItem } from '@/components/logs/log-item'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { Plant } from '@/lib/types'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval, computeSmartMistingInterval } from '@/lib/utils/smart-interval'
+import type { Plant, PlantStatus } from '@/lib/types'
 
 // ─── care stat carousel ───────────────────────────────────────────────────────
 
 function relativeLabel(dateStr: string | null | undefined): string {
   if (!dateStr) return '—'
-  const d = parseISO(dateStr)
-  return formatDistanceToNow(d, { addSuffix: true })
+  return formatDistanceToNow(parseISO(dateStr), { addSuffix: true })
 }
 
 function nextLabel(dateStr: string | null | undefined): string {
@@ -36,8 +36,7 @@ function nextLabel(dateStr: string | null | undefined): string {
   const d = parseISO(dateStr)
   if (isPast(d) && !isToday(d)) return 'Overdue'
   if (isToday(d)) return 'Today'
-  const diff = differenceInCalendarDays(d, startOfToday())
-  return `In ${diff}d`
+  return `In ${differenceInCalendarDays(d, startOfToday())}d`
 }
 
 function CareStatCard({
@@ -47,6 +46,7 @@ function CareStatCard({
   next,
   accent,
   overdue,
+  onLastChange,
 }: {
   icon: React.ElementType
   label: string
@@ -54,20 +54,238 @@ function CareStatCard({
   next: string | null | undefined
   accent: string
   overdue: boolean
+  onLastChange?: (date: string) => void
 }) {
+  const [editingDate, setEditingDate] = useState(false)
+
   return (
     <div
-      className={`flex-shrink-0 w-36 bg-stone-100 rounded-xl p-3.5 border ${overdue ? 'border-clay-400/40' : 'border-stone-300'}`}
+      className={`flex-shrink-0 w-40 bg-stone-100 rounded-xl p-3.5 border ${overdue ? 'border-clay-400/40' : 'border-stone-300'}`}
       style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}
     >
       <div className={`w-7 h-7 rounded-full flex items-center justify-center mb-2 ${accent}`}>
         <Icon size={15} />
       </div>
       <p className="text-[9px] text-stone-500 uppercase tracking-widest font-medium mb-1">{label}</p>
-      <p className="text-xs text-stone-500">Last: <span className="text-leaf-700 font-medium">{relativeLabel(last)}</span></p>
-      <p className={`text-xs mt-0.5 ${overdue ? 'text-clay-500 font-semibold' : 'text-stone-500'}`}>
+
+      {editingDate && onLastChange ? (
+        <input
+          type="date"
+          defaultValue={last ?? format(new Date(), 'yyyy-MM-dd')}
+          max={format(new Date(), 'yyyy-MM-dd')}
+          autoFocus
+          onChange={(e) => {
+            if (e.target.value) {
+              onLastChange(e.target.value)
+              setEditingDate(false)
+            }
+          }}
+          onBlur={() => setEditingDate(false)}
+          className="w-full text-xs text-leaf-700 bg-stone-50 border border-leaf-400 rounded px-1.5 py-0.5 outline-none mb-1"
+        />
+      ) : (
+        <p className="text-xs text-stone-500 mb-0.5">
+          Last:{' '}
+          <span
+            className={`text-leaf-700 font-medium ${onLastChange ? 'cursor-pointer underline decoration-dotted underline-offset-2' : ''}`}
+            onClick={() => onLastChange && setEditingDate(true)}
+          >
+            {relativeLabel(last)}
+          </span>
+        </p>
+      )}
+
+      <p className={`text-xs ${overdue ? 'text-clay-500 font-semibold' : 'text-stone-500'}`}>
         Next: <span className="font-medium">{nextLabel(next)}</span>
       </p>
+    </div>
+  )
+}
+
+// ─── status switcher ──────────────────────────────────────────────────────────
+
+const STATUS_OPTIONS: { value: PlantStatus; label: string; active: string }[] = [
+  { value: 'healthy',         label: 'Healthy',    active: 'bg-leaf-500 text-white border-leaf-600' },
+  { value: 'recovering',      label: 'Recovering', active: 'bg-amber-500 text-white border-amber-600' },
+  { value: 'needs_attention', label: 'Attention',  active: 'bg-clay-400 text-white border-clay-500' },
+]
+
+function StatusSwitcher({ status, onChange, saving }: {
+  status: PlantStatus
+  onChange: (s: PlantStatus) => void
+  saving: boolean
+}) {
+  return (
+    <div className="flex gap-2 mb-4">
+      {STATUS_OPTIONS.map(({ value, label, active }) => (
+        <button
+          key={value}
+          onClick={() => onChange(value)}
+          disabled={saving || status === value}
+          className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-all disabled:cursor-default ${
+            status === value ? active : 'bg-stone-100 border-stone-300 text-stone-400 hover:border-stone-400'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ─── pot info card ────────────────────────────────────────────────────────────
+
+const POT_TYPES = ['plastic', 'terracotta', 'stoneware', 'glass', 'tray', 'other'] as const
+type PotType = typeof POT_TYPES[number]
+const POT_LABELS: Record<PotType, string> = {
+  plastic: 'Plastic',
+  terracotta: 'Terracotta',
+  stoneware: 'Ceramic',
+  glass: 'Glass',
+  tray: 'Tray',
+  other: 'Other',
+}
+
+type PotUpdates = Partial<Pick<Plant, 'pot_type' | 'pot_diameter_cm' | 'has_drainage' | 'last_repotted_at'>>
+
+function PotInfoCard({ plant, onSave, saving }: {
+  plant: Plant
+  onSave: (updates: PotUpdates) => void
+  saving: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [potType, setPotType] = useState<string | null>(plant.pot_type)
+  const [diameter, setDiameter] = useState(plant.pot_diameter_cm?.toString() ?? '')
+  const [hasDrainage, setHasDrainage] = useState<boolean | null>(plant.has_drainage ?? null)
+  const [repottedAt, setRepottedAt] = useState(plant.last_repotted_at ?? '')
+
+  function startEdit() {
+    setPotType(plant.pot_type)
+    setDiameter(plant.pot_diameter_cm?.toString() ?? '')
+    setHasDrainage(plant.has_drainage ?? null)
+    setRepottedAt(plant.last_repotted_at ?? '')
+    setEditing(true)
+  }
+
+  function handleSave() {
+    onSave({
+      pot_type: potType,
+      pot_diameter_cm: diameter ? Number(diameter) : null,
+      has_drainage: hasDrainage,
+      last_repotted_at: repottedAt || null,
+    })
+    setEditing(false)
+  }
+
+  const hasAnyData = plant.pot_type || plant.pot_diameter_cm || plant.has_drainage !== null || plant.last_repotted_at
+
+  return (
+    <div className="mt-4 bg-stone-100 rounded-xl border border-stone-300 px-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+      <div className="flex items-center justify-between py-3 border-b border-stone-200">
+        <p className="text-[10px] font-semibold text-stone-500 uppercase tracking-widest">Pot & repotting</p>
+        {editing ? (
+          <div className="flex gap-3">
+            <button onClick={() => setEditing(false)} className="text-xs text-stone-400 hover:text-stone-600">Cancel</button>
+            <button onClick={handleSave} disabled={saving} className="text-xs font-semibold text-leaf-600 hover:text-leaf-700 disabled:opacity-50">Save</button>
+          </div>
+        ) : (
+          <button onClick={startEdit} className="text-stone-400 hover:text-leaf-600 transition-colors p-1 -mr-1">
+            <Pencil size={14} />
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="py-4 space-y-4">
+          <div>
+            <p className="text-[10px] text-stone-400 uppercase tracking-wide font-medium mb-2">Pot type</p>
+            <div className="flex flex-wrap gap-1.5">
+              {POT_TYPES.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setPotType(potType === t ? null : t)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    potType === t ? 'bg-leaf-500/10 border-leaf-400 text-leaf-700' : 'bg-stone-50 border-stone-300 text-stone-500'
+                  }`}
+                >
+                  {POT_LABELS[t]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[10px] text-stone-400 uppercase tracking-wide font-medium mb-1.5">Diameter (cm)</p>
+            <input
+              type="number"
+              value={diameter}
+              onChange={(e) => setDiameter(e.target.value)}
+              min={1}
+              max={100}
+              placeholder="e.g. 15"
+              className="w-full text-sm rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-leaf-700 outline-none focus:border-leaf-400"
+            />
+          </div>
+
+          <div>
+            <p className="text-[10px] text-stone-400 uppercase tracking-wide font-medium mb-2">Drainage hole</p>
+            <div className="flex gap-2">
+              {([{ v: true, l: 'Yes' }, { v: false, l: 'No' }] as const).map(({ v, l }) => (
+                <button
+                  key={l}
+                  onClick={() => setHasDrainage(hasDrainage === v ? null : v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    hasDrainage === v ? 'bg-leaf-500/10 border-leaf-400 text-leaf-700' : 'bg-stone-50 border-stone-300 text-stone-500'
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[10px] text-stone-400 uppercase tracking-wide font-medium mb-1.5">Last repotted</p>
+            <input
+              type="date"
+              value={repottedAt}
+              onChange={(e) => setRepottedAt(e.target.value)}
+              max={format(new Date(), 'yyyy-MM-dd')}
+              className="w-full text-sm rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-leaf-700 outline-none focus:border-leaf-400"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="py-3 space-y-2.5">
+          {plant.pot_type && (
+            <div className="flex justify-between items-center">
+              <p className="text-xs text-stone-500">Pot type</p>
+              <p className="text-xs font-medium text-leaf-700">{POT_LABELS[plant.pot_type as PotType] ?? plant.pot_type}</p>
+            </div>
+          )}
+          {plant.pot_diameter_cm && (
+            <div className="flex justify-between items-center">
+              <p className="text-xs text-stone-500">Diameter</p>
+              <p className="text-xs font-medium text-leaf-700">{plant.pot_diameter_cm} cm</p>
+            </div>
+          )}
+          {plant.has_drainage !== null && plant.has_drainage !== undefined && (
+            <div className="flex justify-between items-center">
+              <p className="text-xs text-stone-500">Drainage</p>
+              <p className="text-xs font-medium text-leaf-700">{plant.has_drainage ? 'Has drainage hole' : 'No drainage hole'}</p>
+            </div>
+          )}
+          {plant.last_repotted_at && (
+            <div className="flex justify-between items-center">
+              <p className="text-xs text-stone-500">Last repotted</p>
+              <p className="text-xs font-medium text-leaf-700">{format(parseISO(plant.last_repotted_at), 'MMM d, yyyy')}</p>
+            </div>
+          )}
+          {!hasAnyData && (
+            <p className="text-xs text-stone-400 italic py-1">Tap the pencil to add pot details</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -79,9 +297,9 @@ function PlantTasksTab({ plant }: { plant: Plant }) {
   const today = format(new Date(), 'yyyy-MM-dd')
 
   const allTasks = [
-    { type: 'watering' as const, label: 'Water', icon: Droplets, dueDate: plant.next_watered_at, intervalDays: plant.watering_interval_days, color: 'text-leaf-500' },
-    { type: 'misting' as const, label: 'Mist', icon: Wind, dueDate: plant.next_misted_at, intervalDays: plant.misting_interval_days, color: 'text-sky-500' },
-    { type: 'fertilizing' as const, label: 'Fertilize', icon: Sprout, dueDate: plant.next_fertilized_at, intervalDays: plant.fertilizing_interval_days, color: 'text-olive-500' },
+    { type: 'watering' as const, label: 'Water', icon: Droplets, dueDate: plant.next_watered_at, color: 'text-leaf-500' },
+    { type: 'misting' as const, label: 'Mist', icon: Wind, dueDate: plant.next_misted_at, color: 'text-sky-500' },
+    { type: 'fertilizing' as const, label: 'Fertilize', icon: Sprout, dueDate: plant.next_fertilized_at, color: 'text-olive-500' },
   ]
   const tasks = allTasks.filter((t) => t.dueDate !== null)
 
@@ -188,91 +406,78 @@ function InfoRow({ icon: Icon, label, value, accent }: { icon: React.ElementType
   )
 }
 
-function CareInfoTab({ plant }: { plant: Plant }) {
+function CareInfoTab({ plant, onStatusChange, onPotSave, updating }: {
+  plant: Plant
+  onStatusChange: (status: PlantStatus) => void
+  onPotSave: (updates: PotUpdates) => void
+  updating: boolean
+}) {
   const hasData = plant.light_requirement || plant.humidity_preference || plant.soil_type || plant.temperature_min || plant.watering_interval_days
 
-  if (!hasData) {
-    return (
-      <div className="py-10 text-center">
-        <p className="text-stone-400 text-sm mb-1">No care profile detected yet.</p>
-        <p className="text-xs text-stone-400">
-          {plant.species
-            ? 'Edit the plant to re-trigger species lookup.'
-            : 'Add a species name to auto-detect care requirements.'}
-        </p>
-      </div>
-    )
-  }
-
   return (
-    <div className="bg-stone-100 rounded-xl border border-stone-300 px-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
-      {plant.watering_interval_days && (
-        <InfoRow
-          icon={Droplets}
-          label="Watering"
-          value={`Every ${plant.watering_interval_days} days`}
-          accent="bg-leaf-500/10 text-leaf-500"
-        />
-      )}
-      {plant.misting_interval_days && (
-        <InfoRow
-          icon={Wind}
-          label="Misting"
-          value={`Every ${plant.misting_interval_days} days`}
-          accent="bg-sky-100 text-sky-500"
-        />
-      )}
-      {plant.fertilizing_interval_days && (
-        <InfoRow
-          icon={Sprout}
-          label="Fertilizing"
-          value={`Every ${plant.fertilizing_interval_days} days`}
-          accent="bg-olive-400/10 text-olive-500"
-        />
-      )}
-      {plant.light_requirement && (
-        <InfoRow
-          icon={Sun}
-          label="Light"
-          value={LIGHT_LABELS[plant.light_requirement] ?? plant.light_requirement}
-          accent="bg-amber-100 text-amber-500"
-        />
-      )}
-      {plant.humidity_preference && (
-        <InfoRow
-          icon={Wind}
-          label="Humidity"
-          value={HUMIDITY_LABELS[plant.humidity_preference] ?? plant.humidity_preference}
-          accent="bg-sky-100 text-sky-500"
-        />
-      )}
-      {plant.soil_type && (
-        <InfoRow
-          icon={Leaf}
-          label="Soil"
-          value={plant.soil_type}
-          accent="bg-stone-300 text-stone-600"
-        />
-      )}
-      {(plant.temperature_min || plant.temperature_max) && (
-        <InfoRow
-          icon={Thermometer}
-          label="Temperature"
-          value={
-            plant.temperature_min && plant.temperature_max
-              ? `${plant.temperature_min}–${plant.temperature_max}°C`
-              : plant.temperature_min
-              ? `Min ${plant.temperature_min}°C`
-              : `Max ${plant.temperature_max}°C`
-          }
-          accent="bg-orange-100 text-orange-500"
-        />
-      )}
-      {plant.watering_source && (
-        <p className="text-[10px] text-stone-400 py-3 text-center">
-          Data source: {plant.watering_source === 'perenual' ? 'Perenual plant database' : 'AI estimate'}
-        </p>
-      )}
+    <div>
+      {/* Status switcher */}
+      <StatusSwitcher status={plant.status} onChange={onStatusChange} saving={updating} />
+
+      {/* Care info card — read-only, loader while recalculating */}
+      <div className="relative">
+        {updating && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-stone-50/70 rounded-xl">
+            <div className="w-6 h-6 rounded-full border-2 border-leaf-400 border-t-transparent animate-spin" />
+          </div>
+        )}
+        {hasData ? (
+          <div className="bg-stone-100 rounded-xl border border-stone-300 px-4" style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}>
+            {plant.watering_interval_days && (
+              <InfoRow icon={Droplets} label="Watering" value={`Every ${plant.watering_interval_days} days`} accent="bg-leaf-500/10 text-leaf-500" />
+            )}
+            {plant.misting_interval_days && (
+              <InfoRow icon={Wind} label="Misting" value={`Every ${plant.misting_interval_days} days`} accent="bg-sky-100 text-sky-500" />
+            )}
+            {plant.fertilizing_interval_days && (
+              <InfoRow icon={Sprout} label="Fertilizing" value={`Every ${plant.fertilizing_interval_days} days`} accent="bg-olive-400/10 text-olive-500" />
+            )}
+            {plant.light_requirement && (
+              <InfoRow icon={Sun} label="Light" value={LIGHT_LABELS[plant.light_requirement] ?? plant.light_requirement} accent="bg-amber-100 text-amber-500" />
+            )}
+            {plant.humidity_preference && (
+              <InfoRow icon={Wind} label="Humidity" value={HUMIDITY_LABELS[plant.humidity_preference] ?? plant.humidity_preference} accent="bg-sky-100 text-sky-500" />
+            )}
+            {plant.soil_type && (
+              <InfoRow icon={Leaf} label="Soil" value={plant.soil_type} accent="bg-stone-300 text-stone-600" />
+            )}
+            {(plant.temperature_min || plant.temperature_max) && (
+              <InfoRow
+                icon={Thermometer}
+                label="Temperature"
+                value={
+                  plant.temperature_min && plant.temperature_max
+                    ? `${plant.temperature_min}–${plant.temperature_max}°C`
+                    : plant.temperature_min
+                    ? `Min ${plant.temperature_min}°C`
+                    : `Max ${plant.temperature_max}°C`
+                }
+                accent="bg-orange-100 text-orange-500"
+              />
+            )}
+            {plant.watering_source && (
+              <p className="text-[10px] text-stone-400 py-3 text-center">
+                Data source: {plant.watering_source === 'perenual' ? 'Perenual plant database' : 'AI estimate'}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="py-8 text-center bg-stone-100 rounded-xl border border-stone-300 px-4">
+            <p className="text-stone-400 text-sm mb-1">No care profile detected yet.</p>
+            <p className="text-xs text-stone-400">
+              {plant.species ? 'Edit the plant to re-trigger species lookup.' : 'Add a species name to auto-detect care requirements.'}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Pot info card */}
+      <PotInfoCard plant={plant} onSave={onPotSave} saving={updating} />
     </div>
   )
 }
@@ -327,9 +532,95 @@ export default function PlantDetailPage() {
   const [tab, setTab] = useState<Tab>('tasks')
 
   const { data: plant, isLoading } = usePlant(id)
+  const updatePlant = useUpdatePlant(id)
   const archivePlant = useArchivePlant()
   const deletePlant = useDeletePlant()
+  const { data: siteLocations } = useSiteLocations()
 
+  const locationMap = useMemo(
+    () => new Map((siteLocations ?? []).map((l) => [l.name, l])),
+    [siteLocations],
+  )
+
+  // ─ watering date edit ─────────────────────────────────────────────────────
+  async function handleLastWateringChange(date: string) {
+    if (!plant) return
+    const loc = locationMap.get(plant.location ?? '')
+    const smartInterval = computeSmartWateringInterval(plant, loc?.geo_lat ?? null)
+    const interval = smartInterval ?? plant.watering_interval_days
+    try {
+      await updatePlant.mutateAsync({
+        last_watered_at: date,
+        next_check_soil_at: null,
+        ...(interval ? { next_watered_at: format(addDays(parseISO(date), interval), 'yyyy-MM-dd') } : {}),
+      })
+      toast.success('Watering date updated')
+    } catch { toast.error('Failed to update') }
+  }
+
+  async function handleLastFertilizingChange(date: string) {
+    if (!plant) return
+    const loc = locationMap.get(plant.location ?? '')
+    const fertResult = computeSmartFertilizingInterval(plant, loc?.geo_lat ?? null)
+    const interval = fertResult && !fertResult.suspended ? fertResult.days : plant.fertilizing_interval_days
+    try {
+      await updatePlant.mutateAsync({
+        last_fertilized_at: date,
+        ...(interval ? { next_fertilized_at: format(addDays(parseISO(date), interval), 'yyyy-MM-dd') } : {}),
+      })
+      toast.success('Fertilizing date updated')
+    } catch { toast.error('Failed to update') }
+  }
+
+  // ─ status change ──────────────────────────────────────────────────────────
+  async function handleStatusChange(status: PlantStatus) {
+    try {
+      await updatePlant.mutateAsync({ status })
+    } catch { toast.error('Failed to update status') }
+  }
+
+  // ─ pot info save + interval recalculation ─────────────────────────────────
+  async function handlePotSave(updates: PotUpdates) {
+    if (!plant) return
+    const updatedPlant = { ...plant, ...updates }
+    const loc = locationMap.get(plant.location ?? '')
+    const geoLat = loc?.geo_lat ?? null
+    const locationHumidity = loc?.humidity ?? null
+    const locationLightLevel = loc?.light_level ?? null
+
+    const smartWatering = computeSmartWateringInterval(updatedPlant, geoLat)
+    const fertResult = computeSmartFertilizingInterval(updatedPlant, geoLat)
+    const smartFert = fertResult && !fertResult.suspended ? fertResult.days : null
+    const smartMisting = computeSmartMistingInterval(updatedPlant, locationHumidity, locationLightLevel)
+
+    const payload: Partial<Plant> = {
+      ...updates,
+      misting_interval_days: smartMisting,
+      misting_source: smartMisting ? 'formula' : null,
+      next_misted_at: smartMisting
+        ? format(addDays(plant.last_misted_at ? parseISO(plant.last_misted_at) : new Date(), smartMisting), 'yyyy-MM-dd')
+        : null,
+    }
+    if (smartWatering) {
+      payload.watering_interval_days = smartWatering
+      if (plant.last_watered_at) {
+        payload.next_watered_at = format(addDays(parseISO(plant.last_watered_at), smartWatering), 'yyyy-MM-dd')
+      }
+    }
+    if (smartFert) {
+      payload.fertilizing_interval_days = smartFert
+      if (plant.last_fertilized_at) {
+        payload.next_fertilized_at = format(addDays(parseISO(plant.last_fertilized_at), smartFert), 'yyyy-MM-dd')
+      }
+    }
+
+    try {
+      await updatePlant.mutateAsync(payload)
+      toast.success('Pot info saved')
+    } catch { toast.error('Failed to save') }
+  }
+
+  // ─ archive / delete ───────────────────────────────────────────────────────
   async function handleArchive() {
     if (!confirm(`Archive ${plant?.name}? You can restore it later.`)) return
     try {
@@ -351,7 +642,6 @@ export default function PlantDetailPage() {
   if (isLoading) {
     return (
       <>
-        <Header title="" showBack transparent />
         <Skeleton className="h-56 w-full" />
         <div className="px-4 py-4 space-y-4">
           <Skeleton className="h-6 w-48" />
@@ -418,7 +708,7 @@ export default function PlantDetailPage() {
         </div>
       </header>
 
-      {/* Hero — aspect-video (shorter than square) */}
+      {/* Hero */}
       <div className="w-full aspect-video bg-stone-200 relative">
         {plant.photo_url ? (
           <Image src={plant.photo_url} alt={plant.name} fill className="object-cover" priority sizes="512px" />
@@ -426,17 +716,13 @@ export default function PlantDetailPage() {
           <div className="w-full h-full flex items-center justify-center text-6xl">🪴</div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-stone-900/60 via-transparent to-transparent" />
-
-        {/* Name + status overlay */}
         <div className="absolute bottom-0 left-0 right-0 px-4 pb-4">
           <div className="flex items-end justify-between">
             <div className="flex-1 min-w-0 mr-3">
               <h1 className="text-2xl font-semibold text-white leading-tight truncate">
                 {plant.nickname ?? plant.name}
               </h1>
-              {plant.species && (
-                <p className="text-white/70 text-sm italic truncate">{plant.species}</p>
-              )}
+              {plant.species && <p className="text-white/70 text-sm italic truncate">{plant.species}</p>}
             </div>
             <PlantStatusBadge status={plant.status} />
           </div>
@@ -447,16 +733,8 @@ export default function PlantDetailPage() {
         {/* Meta row */}
         {(plant.location || plant.acquisition_date) && (
           <div className="flex flex-wrap gap-3 text-xs text-stone-500 mb-4">
-            {plant.location && (
-              <div className="flex items-center gap-1">
-                <MapPin size={12} /> {plant.location}
-              </div>
-            )}
-            {plant.acquisition_date && (
-              <div className="flex items-center gap-1">
-                <Calendar size={12} /> Since {format(parseISO(plant.acquisition_date), 'MMM yyyy')}
-              </div>
-            )}
+            {plant.location && <div className="flex items-center gap-1"><MapPin size={12} /> {plant.location}</div>}
+            {plant.acquisition_date && <div className="flex items-center gap-1"><Calendar size={12} /> Since {format(parseISO(plant.acquisition_date), 'MMM yyyy')}</div>}
           </div>
         )}
 
@@ -469,6 +747,7 @@ export default function PlantDetailPage() {
             next={plant.next_watered_at}
             accent="bg-leaf-500/10 text-leaf-500"
             overdue={!!wateredOverdue}
+            onLastChange={handleLastWateringChange}
           />
           {plant.misting_interval_days && (
             <CareStatCard
@@ -487,6 +766,7 @@ export default function PlantDetailPage() {
             next={plant.next_fertilized_at}
             accent="bg-olive-400/10 text-olive-500"
             overdue={!!fertilizedOverdue}
+            onLastChange={handleLastFertilizingChange}
           />
         </div>
 
@@ -504,9 +784,7 @@ export default function PlantDetailPage() {
               key={t}
               onClick={() => setTab(t)}
               className={`flex-1 py-2 text-xs font-semibold rounded-lg capitalize transition-all ${
-                tab === t
-                  ? 'bg-stone-50 text-leaf-700 shadow-sm'
-                  : 'text-stone-400 hover:text-olive-500'
+                tab === t ? 'bg-stone-50 text-leaf-700 shadow-sm' : 'text-stone-400 hover:text-olive-500'
               }`}
             >
               {t === 'tasks' ? 'Tasks' : t === 'info' ? 'Care Info' : 'History'}
@@ -516,11 +794,18 @@ export default function PlantDetailPage() {
 
         {/* Tab content */}
         {tab === 'tasks' && <PlantTasksTab plant={plant} />}
-        {tab === 'info' && <CareInfoTab plant={plant} />}
+        {tab === 'info' && (
+          <CareInfoTab
+            plant={plant}
+            onStatusChange={handleStatusChange}
+            onPotSave={handlePotSave}
+            updating={updatePlant.isPending}
+          />
+        )}
         {tab === 'history' && <HistoryTab plantId={id} plant={plant} />}
       </main>
 
-      {/* FAB for logging */}
+      {/* FAB */}
       <AddLogSheet
         plantId={id}
         wateringIntervalDays={plant.watering_interval_days}

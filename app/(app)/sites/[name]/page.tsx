@@ -364,20 +364,13 @@ export default function SiteDetailPage() {
             )}
           </p>
         </div>
-        {editing ? (
+        {editing && (
           <button
             onClick={handleSave}
             disabled={upsert.isPending}
             className="px-3 py-1.5 bg-leaf-500 text-stone-50 text-sm font-semibold rounded-lg hover:bg-leaf-600 disabled:opacity-50 transition-colors"
           >
             {upsert.isPending ? 'Saving…' : 'Save'}
-          </button>
-        ) : (
-          <button
-            onClick={startEdit}
-            className="px-3 py-1.5 text-sm font-medium text-leaf-600 border border-leaf-400/30 rounded-lg hover:bg-leaf-500/10 transition-colors flex items-center gap-1.5"
-          >
-            <Pencil size={13} /> Edit
           </button>
         )}
       </header>
@@ -442,9 +435,20 @@ export default function SiteDetailPage() {
           className="bg-stone-100 rounded-xl border border-stone-300 p-4 space-y-5"
           style={{ boxShadow: '0 2px 12px -2px rgba(0,0,0,0.06)' }}
         >
-          <h2 className="text-xs font-semibold text-stone-500 uppercase tracking-widest">
-            Environment
-          </h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold text-stone-500 uppercase tracking-widest">
+              Environment
+            </h2>
+            {!editing && (
+              <button
+                onClick={startEdit}
+                className="text-stone-400 hover:text-leaf-600 transition-colors p-1 -mr-1"
+                aria-label="Edit environment"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+          </div>
 
           {/* Location type */}
           <div>
