@@ -64,10 +64,11 @@ export function useCreateLog() {
       if (error) throw error
 
       // Auto-update plant care dates
-      const plantUpdate: Record<string, string> = {}
+      const plantUpdate: Record<string, string | null> = {}
 
       if (values.type === 'watering') {
         plantUpdate.last_watered_at = values.date
+        plantUpdate.next_check_soil_at = null
         if (wateringIntervalDays) {
           plantUpdate.next_watered_at = nextDate(values.date, wateringIntervalDays)
         }

@@ -4,14 +4,14 @@ import { useState, useEffect, useMemo } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { format, isToday, isTomorrow, isPast, parseISO, startOfToday, differenceInCalendarDays, addDays } from 'date-fns'
-import { Droplets, Sprout, Wind, CheckCircle2, Plus, HelpCircle } from 'lucide-react'
+import { Droplets, Sprout, Wind, CheckCircle2, Plus, HelpCircle, Leaf } from 'lucide-react'
 import { toast } from 'sonner'
 import { useUpcomingTasks } from '@/lib/hooks/use-plants'
 import { useSiteLocations } from '@/lib/hooks/use-locations'
 import { useCreateLog } from '@/lib/hooks/use-logs'
 import { Skeleton } from '@/components/ui/skeleton'
 import { generateWateringRecommendation } from '@/lib/actions/generate-recommendation'
-import { computeSmartWateringInterval, computeSmartFertilizingInterval, computeSmartMistingInterval } from '@/lib/utils/smart-interval'
+import { computeSmartWateringInterval, computeSmartFertilizingInterval, computeSmartMistingInterval, computeCheckSoilInterval } from '@/lib/utils/smart-interval'
 import { createClient } from '@/lib/supabase/client'
 import type { UpcomingTask, Plant } from '@/lib/types'
 
@@ -52,9 +52,10 @@ function groupByBucket(tasks: UpcomingTask[]): Map<string, UpcomingTask[]> {
 // ─── action config ───────────────────────────────────────────────────────────
 
 const ACTION_CONFIG = {
-  watering:    { label: 'Water',     icon: Droplets, color: 'bg-leaf-500/10 text-leaf-600 border-leaf-400/30' },
-  misting:     { label: 'Mist',      icon: Wind,     color: 'bg-sky-100 text-sky-600 border-sky-300/40' },
-  fertilizing: { label: 'Fertilize', icon: Sprout,   color: 'bg-olive-400/10 text-olive-600 border-olive-400/30' },
+  watering:    { label: 'Water',      icon: Droplets, color: 'bg-leaf-500/10 text-leaf-600 border-leaf-400/30' },
+  misting:     { label: 'Mist',       icon: Wind,     color: 'bg-sky-100 text-sky-600 border-sky-300/40' },
+  fertilizing: { label: 'Fertilize',  icon: Sprout,   color: 'bg-olive-400/10 text-olive-600 border-olive-400/30' },
+  check_soil:  { label: 'Check soil', icon: Leaf,     color: 'bg-amber-100 text-amber-700 border-amber-200' },
 }
 
 // ─── watering info sheet ──────────────────────────────────────────────────────
@@ -200,6 +201,70 @@ function WateringSheet({
   )
 }
 
+// ─── check soil sheet ─────────────────────────────────────────────────────────
+
+function CheckSoilSheet({
+  task,
+  onClose,
+  onWatered,
+  onCheckLater,
+}: {
+  task: UpcomingTask
+  onClose: () => void
+  onWatered: () => void
+  onCheckLater: () => void
+}) {
+  const plant = task.plant
+  const interval = computeCheckSoilInterval(plant)
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-stone-50 rounded-t-2xl shadow-2xl px-5 pt-5 pb-8 max-w-lg mx-auto">
+        <div className="w-10 h-1 bg-stone-300 rounded-full mx-auto mb-5" />
+
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-12 h-12 rounded-xl bg-stone-200 overflow-hidden relative flex-shrink-0">
+            {plant.photo_url ? (
+              <Image src={plant.photo_url} alt={plant.name} fill className="object-cover" sizes="48px" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-xl">🪴</div>
+            )}
+          </div>
+          <div>
+            <h3 className="font-medium text-leaf-700">{plant.nickname ?? plant.name}</h3>
+            {plant.species && <p className="text-xs text-stone-500 italic">{plant.species}</p>}
+          </div>
+          <div className="ml-auto flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 border border-amber-200 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+            <Leaf size={11} />
+            Check soil
+          </div>
+        </div>
+
+        <p className="text-sm text-stone-600 mb-6 leading-relaxed">
+          No watering history yet. Stick your finger ~2 cm into the soil — is it dry?
+        </p>
+
+        <div className="space-y-2">
+          <button
+            onClick={onWatered}
+            className="w-full flex items-center justify-center gap-2 bg-leaf-500 text-stone-50 font-medium py-3.5 rounded-xl hover:bg-leaf-600 transition-colors"
+          >
+            <CheckCircle2 size={18} />
+            Yes, dry — I watered it
+          </button>
+          <button
+            onClick={onCheckLater}
+            className="w-full flex items-center justify-center gap-2 bg-stone-100 border border-stone-300 text-olive-600 font-medium py-3 rounded-xl hover:bg-stone-200 transition-colors text-sm"
+          >
+            Still moist — check again in {interval} {interval === 1 ? 'day' : 'days'}
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ─── task item ───────────────────────────────────────────────────────────────
 
 function TaskItem({
@@ -239,16 +304,16 @@ function TaskItem({
         )}
       </Link>
 
-      {/* Action badge — watering gets a ? button */}
-      {task.type === 'watering' && onOpenSheet ? (
+      {/* Action badge */}
+      {(task.type === 'watering' || task.type === 'check_soil') && onOpenSheet ? (
         <button
           onClick={onOpenSheet}
           className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold uppercase tracking-wide ${cfg.color}`}
-          aria-label="Watering guide"
+          aria-label={task.type === 'watering' ? 'Watering guide' : 'Check soil'}
         >
           <Icon size={11} />
           {cfg.label}
-          <HelpCircle size={10} className="opacity-60 ml-0.5" />
+          {task.type === 'watering' && <HelpCircle size={10} className="opacity-60 ml-0.5" />}
         </button>
       ) : (
         <div className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold uppercase tracking-wide ${cfg.color}`}>
@@ -257,14 +322,16 @@ function TaskItem({
         </div>
       )}
 
-      {/* Complete button */}
-      <button
-        onClick={onComplete}
-        className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-stone-300 hover:text-leaf-500 hover:bg-leaf-500/10 transition-colors"
-        aria-label="Mark done"
-      >
-        <CheckCircle2 size={22} />
-      </button>
+      {/* Complete button — check_soil must go through the sheet */}
+      {task.type !== 'check_soil' && (
+        <button
+          onClick={onComplete}
+          className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-stone-300 hover:text-leaf-500 hover:bg-leaf-500/10 transition-colors"
+          aria-label="Mark done"
+        >
+          <CheckCircle2 size={22} />
+        </button>
+      )}
     </div>
   )
 }
@@ -328,6 +395,7 @@ export default function TasksPage() {
   const { data: siteLocations } = useSiteLocations()
   const createLog = useCreateLog()
   const [sheetTask, setSheetTask] = useState<UpcomingTask | null>(null)
+  const [checkSoilTask, setCheckSoilTask] = useState<UpcomingTask | null>(null)
 
   const locationMap = useMemo(
     () => new Map((siteLocations ?? []).map((l) => [l.name, l])),
@@ -335,6 +403,7 @@ export default function TasksPage() {
   )
 
   async function handleComplete(task: UpcomingTask) {
+    if (task.type === 'check_soil') return
     const { plant, type } = task
     const loc = locationMap.get(plant.location ?? '')
     const geoLat = loc?.geo_lat ?? null
@@ -358,6 +427,49 @@ export default function TasksPage() {
     } catch {
       toast.error('Failed to log care')
     }
+  }
+
+  async function handleCheckSoilWatered(task: UpcomingTask) {
+    const { plant } = task
+    const loc = locationMap.get(plant.location ?? '')
+    const geoLat = loc?.geo_lat ?? null
+    const smartWateringInterval = computeSmartWateringInterval(plant, geoLat)
+    const fertResult = computeSmartFertilizingInterval(plant, geoLat)
+    const smartFertilizingInterval = fertResult && !fertResult.suspended ? fertResult.days : null
+    const smartMistingInterval = computeSmartMistingInterval(plant, loc?.humidity, loc?.light_level)
+    try {
+      await createLog.mutateAsync({
+        plant_id: plant.id,
+        type: 'watering',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        note: null,
+        issue_description: null,
+        photo_url: null,
+        wateringIntervalDays: smartWateringInterval ?? plant.watering_interval_days,
+        mistingIntervalDays: smartMistingInterval ?? plant.misting_interval_days,
+        fertilizingIntervalDays: smartFertilizingInterval ?? plant.fertilizing_interval_days,
+      })
+      toast.success(`Watering logged for ${plant.nickname ?? plant.name}`)
+    } catch {
+      toast.error('Failed to log care')
+    }
+    setCheckSoilTask(null)
+  }
+
+  async function handleCheckAgainLater(task: UpcomingTask) {
+    const interval = computeCheckSoilInterval(task.plant)
+    const newDate = format(addDays(new Date(), interval), 'yyyy-MM-dd')
+    try {
+      await createClient()
+        .from('plants')
+        .update({ next_check_soil_at: newDate })
+        .eq('id', task.plant.id)
+      window.dispatchEvent(new Event('focus'))
+      toast.success(`Check soil again on ${format(parseISO(newDate), 'MMM d')}`)
+    } catch {
+      toast.error('Failed to reschedule')
+    }
+    setCheckSoilTask(null)
   }
 
   async function handleSnooze(task: UpcomingTask) {
@@ -419,7 +531,11 @@ export default function TasksPage() {
                       key={task.key}
                       task={task}
                       onComplete={() => handleComplete(task)}
-                      onOpenSheet={task.type === 'watering' ? () => setSheetTask(task) : undefined}
+                      onOpenSheet={
+                        task.type === 'watering' ? () => setSheetTask(task)
+                        : task.type === 'check_soil' ? () => setCheckSoilTask(task)
+                        : undefined
+                      }
                     />
                   ))}
                 </div>
@@ -428,6 +544,16 @@ export default function TasksPage() {
           </div>
         )}
       </main>
+
+      {/* Check soil sheet */}
+      {checkSoilTask && (
+        <CheckSoilSheet
+          task={checkSoilTask}
+          onClose={() => setCheckSoilTask(null)}
+          onWatered={() => handleCheckSoilWatered(checkSoilTask)}
+          onCheckLater={() => handleCheckAgainLater(checkSoilTask)}
+        />
+      )}
 
       {/* Watering sheet */}
       {sheetTask && (

@@ -387,6 +387,14 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         (data.location?.trim() || null) !== (plant.location ?? null)
       )
 
+      // Check-soil task: set for new plants with a watering schedule but no history
+      let nextCheckSoilAt: string | null = null
+      if (!data.last_watered_at && wateringIntervalDays) {
+        nextCheckSoilAt = !plant
+          ? format(new Date(), 'yyyy-MM-dd')
+          : (plant.next_check_soil_at ?? null)
+      }
+
       // Compute next_watered_at
       let nextWateredAt: string | null = plant?.next_watered_at ?? null
       if (data.last_watered_at && wateringIntervalDays) {
@@ -456,6 +464,8 @@ export function PlantForm({ plant }: { plant?: Plant }) {
         pot_diameter_cm: data.pot_diameter_cm ? Number(data.pot_diameter_cm) : null,
         pot_height_cm: data.pot_height_cm ? Number(data.pot_height_cm) : null,
         has_drainage: hasDrainage,
+        // Check soil
+        next_check_soil_at: nextCheckSoilAt,
         // Misc
         last_repotted_at: data.last_repotted_at || null,
         // Clear recommendation when care-relevant settings change so it regenerates

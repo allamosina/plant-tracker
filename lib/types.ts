@@ -47,6 +47,8 @@ export interface Plant {
   temperature_min: number | null
   temperature_max: number | null
   soil_type: string | null
+  // Check soil (plants with no watering history)
+  next_check_soil_at: string | null
   // Watering recommendation (generated once by Claude, cached)
   watering_recommendation: string | null
   watering_recommendation_updated_at: string | null
@@ -76,7 +78,7 @@ export interface PlantWithLastLog extends Plant {
 export interface UpcomingTask {
   key: string
   plant: Plant
-  type: 'watering' | 'misting' | 'fertilizing'
+  type: 'watering' | 'misting' | 'fertilizing' | 'check_soil'
   dueDate: string // YYYY-MM-DD
 }
 

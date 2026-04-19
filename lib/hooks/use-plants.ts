@@ -78,6 +78,7 @@ export function useUpcomingTasks() {
   if (plants) {
     for (const plant of plants) {
       const checks: Array<{ type: UpcomingTask['type']; date: string | null }> = [
+        { type: 'check_soil', date: plant.next_check_soil_at },
         { type: 'watering', date: plant.next_watered_at },
         { type: 'misting', date: plant.next_misted_at },
         { type: 'fertilizing', date: plant.next_fertilized_at },

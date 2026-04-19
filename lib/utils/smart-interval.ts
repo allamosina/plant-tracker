@@ -114,6 +114,18 @@ export function computeSmartMistingInterval(
   return MISTING_INTERVALS[archetype] ?? null
 }
 
+// ─── check-soil interval (plants with no watering history) ───────────────────
+
+const CHECK_SOIL_INTERVALS: Record<Archetype, number> = {
+  succulent:       6,
+  regular:         3,
+  moisture_loving: 1,
+}
+
+export function computeCheckSoilInterval(plant: Plant): number {
+  return CHECK_SOIL_INTERVALS[classifyArchetype(plant)]
+}
+
 // ─── post-repot watering delay ────────────────────────────────────────────────
 
 // Days after repotting before the first watering, per archetype:
