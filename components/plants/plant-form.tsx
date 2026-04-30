@@ -428,8 +428,9 @@ export function PlantForm({ plant }: { plant?: Plant }) {
           'yyyy-MM-dd'
         )
       } else if (fertilizingIntervalDays && !nextFertilizedAt && !fertResult?.suspended) {
-        // Schedule is set but no history and no upcoming task → surface a task today
-        nextFertilizedAt = format(new Date(), 'yyyy-MM-dd')
+        // Schedule set but no history → wait 3 weeks from acquisition before first fertilizing
+        const from = data.acquisition_date ? parseISO(data.acquisition_date) : new Date()
+        nextFertilizedAt = format(addDays(from, 21), 'yyyy-MM-dd')
       }
 
       const payload = {
