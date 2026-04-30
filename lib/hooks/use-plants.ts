@@ -5,15 +5,31 @@ import { computeSmartFertilizingInterval } from '@/lib/utils/smart-interval'
 import type { Plant, UpcomingTask } from '@/lib/types'
 
 /**
- * For plants that have a fertilizing schedule but no stored next date,
- * derive the first-fertilizing date as 3 weeks after acquisition (or app
- * add date if acquisition_date is not set), provided the schedule is not
- * currently suspended.
+ * Derives the first-fertilizing date for a plant that doesn't have a stored
+ * next_fertilized_at yet. Falls back to acquisition_date + 21 days, or
+ * created_at + 21 days when acquisition_date isn't set. Returns null if the
+ * archetype-based schedule is currently suspended (recent repot or
+ * winter + low light).
+ *
+ * Works regardless of whether fertilizing_interval_days is stored on the
+ * plant — almost every plant benefits from periodic feeding, and the smart
+ * interval is computed from archetype constants, not from the stored value.
  */
 function deriveFertilizingDate(plant: Plant): string | null {
-  if (!plant.fertilizing_interval_days) return null
-  const fertResult = computeSmartFertilizingInterval(plant, null)
+  // Bypass the "is fertilizing enabled" gate in computeSmartFertilizingInterval
+  // by passing a non-null placeholder; the actual interval comes from FERTILIZE_BASE.
+  const plantForCompute = plant.fertilizing_interval_days
+    ? plant
+    : { ...plant, fertilizing_interval_days: 1 }
+  const fertResult = computeSmartFertilizingInterval(plantForCompute, null)
   if (!fertResult || fertResult.suspended) return null
+
+  // Already fertilized at least once → schedule the next from there
+  if (plant.last_fertilized_at) {
+    return format(addDays(parseISO(plant.last_fertilized_at), fertResult.days), 'yyyy-MM-dd')
+  }
+
+  // No history → wait 3 weeks from acquisition (or from when added to the app)
   const from = plant.acquisition_date
     ? parseISO(plant.acquisition_date)
     : parseISO(plant.created_at)
