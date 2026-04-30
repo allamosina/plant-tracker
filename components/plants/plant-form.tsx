@@ -508,8 +508,12 @@ export function PlantForm({ plant }: { plant?: Plant }) {
       {/* Photo */}
       <div className="flex flex-col items-center gap-3">
 
-        {/* Circle — loader → preview → empty */}
-        <div className="w-32 h-32 rounded-full bg-stone-200 border-2 border-dashed border-stone-300 flex items-center justify-center overflow-hidden">
+        {/* Circle — loader → preview → empty (tappable to open camera) */}
+        <button
+          type="button"
+          onClick={() => !identifying && !photoUrl && cameraRef.current?.click()}
+          className="w-32 h-32 rounded-full bg-stone-200 border-2 border-dashed border-stone-300 flex items-center justify-center overflow-hidden focus:outline-none"
+        >
           {identifying ? (
             <div className="flex flex-col items-center gap-2">
               <div className="w-7 h-7 rounded-full border-2 border-stone-300 border-t-leaf-500 animate-spin" />
@@ -521,10 +525,10 @@ export function PlantForm({ plant }: { plant?: Plant }) {
           ) : (
             <div className="flex flex-col items-center text-stone-400">
               <Camera size={24} className="mb-1" />
-              <span className="text-xs font-medium">No photo</span>
+              <span className="text-xs font-medium">Take photo</span>
             </div>
           )}
-        </div>
+        </button>
 
         {/* Actions below the circle */}
         {!identifying && identifyFailed ? (
@@ -550,34 +554,34 @@ export function PlantForm({ plant }: { plant?: Plant }) {
             </div>
           </div>
         ) : !identifying && photoUrl ? (
-          /* Photo set and identified (or existing saved photo) */
-          <button
-            type="button"
-            className="text-xs text-stone-400 font-medium"
-            onClick={handleRemovePhoto}
-          >
-            Remove photo
-          </button>
-        ) : !identifying ? (
-          /* No photo yet */
+          /* Photo set — remove or retake */
           <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleRemovePhoto}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
+            >
+              Remove
+            </button>
             <button
               type="button"
               onClick={() => cameraRef.current?.click()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
             >
-              <Camera size={13} />
-              Camera
-            </button>
-            <button
-              type="button"
-              onClick={() => galleryRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
-            >
-              <ImageIcon size={13} />
-              Gallery
+              <RefreshCw size={11} />
+              Retake
             </button>
           </div>
+        ) : !identifying ? (
+          /* No photo yet — gallery as secondary option */
+          <button
+            type="button"
+            onClick={() => galleryRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-200 border border-stone-300 text-xs font-medium text-olive-600 hover:bg-stone-300 transition-colors"
+          >
+            <ImageIcon size={13} />
+            Gallery
+          </button>
         ) : null}
 
         {/* Hidden inputs */}
