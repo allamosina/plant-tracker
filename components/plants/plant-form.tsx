@@ -427,6 +427,10 @@ export function PlantForm({ plant }: { plant?: Plant }) {
           addDays(parseISO(data.last_fertilized_at), smartFert ?? fertilizingIntervalDays),
           'yyyy-MM-dd'
         )
+      } else if (fertilizingIntervalDays && !nextFertilizedAt && !fertResult?.suspended) {
+        // Schedule set but no history → wait 3 weeks from acquisition before first fertilizing
+        const from = data.acquisition_date ? parseISO(data.acquisition_date) : new Date()
+        nextFertilizedAt = format(addDays(from, 21), 'yyyy-MM-dd')
       }
 
       const payload = {
