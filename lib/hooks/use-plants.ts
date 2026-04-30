@@ -1,7 +1,24 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { parseISO, isBefore, startOfToday } from 'date-fns'
+import { parseISO, isBefore, startOfToday, addDays, format } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
+import { computeSmartFertilizingInterval } from '@/lib/utils/smart-interval'
 import type { Plant, UpcomingTask } from '@/lib/types'
+
+/**
+ * For plants that have a fertilizing schedule but no stored next date,
+ * derive the first-fertilizing date as 3 weeks after acquisition (or app
+ * add date if acquisition_date is not set), provided the schedule is not
+ * currently suspended.
+ */
+function deriveFertilizingDate(plant: Plant): string | null {
+  if (!plant.fertilizing_interval_days) return null
+  const fertResult = computeSmartFertilizingInterval(plant, null)
+  if (!fertResult || fertResult.suspended) return null
+  const from = plant.acquisition_date
+    ? parseISO(plant.acquisition_date)
+    : parseISO(plant.created_at)
+  return format(addDays(from, 21), 'yyyy-MM-dd')
+}
 
 export function useLocations() {
   return useQuery({
@@ -81,7 +98,7 @@ export function useUpcomingTasks() {
         { type: 'check_soil', date: plant.next_check_soil_at },
         { type: 'watering', date: plant.next_watered_at },
         { type: 'misting', date: plant.next_misted_at },
-        { type: 'fertilizing', date: plant.next_fertilized_at },
+        { type: 'fertilizing', date: plant.next_fertilized_at ?? deriveFertilizingDate(plant) },
       ]
       for (const { type, date } of checks) {
         if (!date) continue
