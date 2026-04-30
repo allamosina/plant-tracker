@@ -427,6 +427,9 @@ export function PlantForm({ plant }: { plant?: Plant }) {
           addDays(parseISO(data.last_fertilized_at), smartFert ?? fertilizingIntervalDays),
           'yyyy-MM-dd'
         )
+      } else if (!plant && fertilizingIntervalDays && !fertResult?.suspended) {
+        // New plant with a schedule but no history → surface a task today so it doesn't stay invisible
+        nextFertilizedAt = format(new Date(), 'yyyy-MM-dd')
       }
 
       const payload = {

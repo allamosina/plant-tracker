@@ -304,6 +304,8 @@ function PlantTasksTab({ plant }: { plant: Plant }) {
   const tasks = allTasks.filter((t) => t.dueDate !== null)
 
   async function complete(type: 'watering' | 'misting' | 'fertilizing') {
+    const fertResult = computeSmartFertilizingInterval(plant, null)
+    const smartFertilizingInterval = fertResult && !fertResult.suspended ? fertResult.days : null
     try {
       await createLog.mutateAsync({
         plant_id: plant.id,
@@ -314,7 +316,7 @@ function PlantTasksTab({ plant }: { plant: Plant }) {
         photo_url: null,
         wateringIntervalDays: plant.watering_interval_days,
         mistingIntervalDays: plant.misting_interval_days,
-        fertilizingIntervalDays: plant.fertilizing_interval_days,
+        fertilizingIntervalDays: smartFertilizingInterval ?? plant.fertilizing_interval_days,
       })
       toast.success('Care logged!')
     } catch {
@@ -607,11 +609,8 @@ export default function PlantDetailPage() {
         payload.next_watered_at = format(addDays(parseISO(plant.last_watered_at), smartWatering), 'yyyy-MM-dd')
       }
     }
-    if (smartFert) {
-      payload.fertilizing_interval_days = smartFert
-      if (plant.last_fertilized_at) {
-        payload.next_fertilized_at = format(addDays(parseISO(plant.last_fertilized_at), smartFert), 'yyyy-MM-dd')
-      }
+    if (smartFert && plant.last_fertilized_at) {
+      payload.next_fertilized_at = format(addDays(parseISO(plant.last_fertilized_at), smartFert), 'yyyy-MM-dd')
     }
 
     try {
