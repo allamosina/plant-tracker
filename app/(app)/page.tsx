@@ -58,6 +58,62 @@ const ACTION_CONFIG = {
   check_soil:  { label: 'Check soil', icon: Leaf,     color: 'bg-amber-100 text-amber-700 border-amber-200' },
 }
 
+// ─── task filters ────────────────────────────────────────────────────────────
+
+type TaskFilter = 'water' | 'fertilize' | 'mist'
+
+const FILTERS: { key: TaskFilter; label: string; icon: typeof Droplets; active: string }[] = [
+  { key: 'water',     label: 'Water',     icon: Droplets, active: 'bg-leaf-500/10 text-leaf-600 border-leaf-400/40' },
+  { key: 'fertilize', label: 'Fertilize', icon: Sprout,   active: 'bg-olive-400/10 text-olive-600 border-olive-400/40' },
+  { key: 'mist',      label: 'Mist',      icon: Wind,     active: 'bg-sky-100 text-sky-600 border-sky-300/50' },
+]
+
+// check_soil is a watering-related task, so it follows the Water filter
+const TASK_FILTER: Record<UpcomingTask['type'], TaskFilter> = {
+  watering: 'water',
+  check_soil: 'water',
+  fertilizing: 'fertilize',
+  misting: 'mist',
+}
+
+function FilterTags({
+  active,
+  onToggle,
+}: {
+  active: Set<TaskFilter>
+  onToggle: (key: TaskFilter) => void
+}) {
+  return (
+    <div className="flex gap-2 mt-3">
+      {FILTERS.map(({ key, label, icon: Icon, active: activeCls }) => {
+        const on = active.has(key)
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onToggle(key)}
+            aria-pressed={on}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+              on ? activeCls : 'bg-stone-50 text-stone-400 border-stone-300 hover:text-stone-500'
+            }`}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function NoFilteredTasks() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[40vh] text-center px-8">
+      <p className="text-sm text-olive-500">No tasks for the selected filters.</p>
+    </div>
+  )
+}
+
 // ─── watering info sheet ──────────────────────────────────────────────────────
 
 function WateringSheet({
@@ -354,24 +410,6 @@ function BucketHeader({ label, count }: { label: string; count: number }) {
 
 // ─── empty states ─────────────────────────────────────────────────────────────
 
-function AllCaughtUp() {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[55vh] text-center px-8">
-      <div className="w-20 h-20 rounded-full bg-leaf-500/10 border border-leaf-400/20 flex items-center justify-center mb-5">
-        <CheckCircle2 size={36} className="text-leaf-500" />
-      </div>
-      <h2 className="text-lg font-medium text-leaf-700 mb-2">All caught up!</h2>
-      <p className="text-sm text-olive-500 mb-6">No upcoming care tasks. Your plants are happy.</p>
-      <Link
-        href="/plants/new"
-        className="inline-flex items-center gap-2 px-5 py-2.5 bg-leaf-500 text-stone-50 text-sm font-medium rounded-xl hover:bg-leaf-600 transition-colors"
-      >
-        <Plus size={16} /> Add a plant
-      </Link>
-    </div>
-  )
-}
-
 function NoPlants() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[55vh] text-center px-8">
@@ -396,6 +434,16 @@ export default function TasksPage() {
   const createLog = useCreateLog()
   const [sheetTask, setSheetTask] = useState<UpcomingTask | null>(null)
   const [checkSoilTask, setCheckSoilTask] = useState<UpcomingTask | null>(null)
+  const [activeFilters, setActiveFilters] = useState<Set<TaskFilter>>(() => new Set(['water']))
+
+  function toggleFilter(key: TaskFilter) {
+    setActiveFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   const locationMap = useMemo(
     () => new Map((siteLocations ?? []).map((l) => [l.name, l])),
@@ -492,7 +540,8 @@ export default function TasksPage() {
     setSheetTask(null)
   }
 
-  const grouped = groupByBucket(tasks)
+  const visibleTasks = tasks.filter((t) => activeFilters.has(TASK_FILTER[t.type]))
+  const grouped = groupByBucket(visibleTasks)
 
   return (
     <div className="pb-24 min-h-screen bg-stone-50">
@@ -502,12 +551,13 @@ export default function TasksPage() {
             <h1 className="text-xl font-medium text-leaf-700">Tasks</h1>
             <p className="text-xs text-olive-500 mt-0.5">{format(new Date(), 'EEEE, MMMM d')}</p>
           </div>
-          {tasks.length > 0 && (
+          {visibleTasks.length > 0 && (
             <span className="text-xs font-medium text-stone-500 bg-stone-200 rounded-full px-2.5 py-1">
-              {tasks.length} pending
+              {visibleTasks.length} pending
             </span>
           )}
         </div>
+        {tasks.length > 0 && <FilterTags active={activeFilters} onToggle={toggleFilter} />}
       </header>
 
       <main className="px-4 py-2">
@@ -519,7 +569,7 @@ export default function TasksPage() {
         ) : tasks.length === 0 && !isLoading ? (
           <NoPlants />
         ) : grouped.size === 0 ? (
-          <AllCaughtUp />
+          <NoFilteredTasks />
         ) : (
           <div className="pt-1">
             {[...grouped.entries()].map(([label, bucket]) => (
