@@ -1,5 +1,8 @@
 export type PlantStatus = 'healthy' | 'needs_attention' | 'recovering'
 
+/** Why a plant left the collection. passed_away → Plant Heaven, the rest → Rehomed. */
+export type DepartureReason = 'passed_away' | 'given_away' | 'left_behind'
+
 export type LogType =
   | 'watering'
   | 'misting'
@@ -52,8 +55,12 @@ export interface Plant {
   // Watering recommendation (generated once by Claude, cached)
   watering_recommendation: string | null
   watering_recommendation_updated_at: string | null
-  // Meta
+  // Departure (Plant Heaven / Rehomed). archived_at doubles as the departure date.
   archived_at: string | null
+  departure_reason: DepartureReason | null
+  departure_note: string | null
+  departure_place: string | null
+  // Meta
   created_at: string
   updated_at: string
 }

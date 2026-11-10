@@ -9,20 +9,23 @@ import {
   differenceInCalendarDays, startOfToday, addDays,
 } from 'date-fns'
 import {
-  Edit2, MoreVertical, MapPin, Calendar, Archive, Trash2,
+  Edit2, MoreVertical, MapPin, Calendar, Feather, Trash2,
   Droplets, Sprout, Wind, CheckCircle2, Sun, Thermometer,
   Leaf, Pencil,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { usePlant, useArchivePlant, useDeletePlant, useUpdatePlant } from '@/lib/hooks/use-plants'
+import { usePlant, useDeletePlant, useUpdatePlant } from '@/lib/hooks/use-plants'
 import { useSiteLocations } from '@/lib/hooks/use-locations'
 import { useLogs, useCreateLog } from '@/lib/hooks/use-logs'
 import { PlantStatusBadge } from '@/components/plants/plant-status-badge'
 import { AddLogSheet } from '@/components/logs/add-log-sheet'
 import { LogItem } from '@/components/logs/log-item'
 import { Skeleton } from '@/components/ui/skeleton'
+import { GoodbyeSheet } from '@/components/plants/goodbye-sheet'
+import { MemorialView } from '@/components/plants/memorial-view'
+import { DEPARTURE_REASONS, displayName } from '@/lib/departure'
 import { computeSmartWateringInterval, computeSmartFertilizingInterval, computeSmartMistingInterval } from '@/lib/utils/smart-interval'
-import type { Plant, PlantStatus } from '@/lib/types'
+import type { DepartureReason, Plant, PlantStatus } from '@/lib/types'
 
 // ─── care stat carousel ───────────────────────────────────────────────────────
 
@@ -531,11 +534,11 @@ export default function PlantDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const [showMenu, setShowMenu] = useState(false)
+  const [showGoodbye, setShowGoodbye] = useState(false)
   const [tab, setTab] = useState<Tab>('tasks')
 
   const { data: plant, isLoading } = usePlant(id)
   const updatePlant = useUpdatePlant(id)
-  const archivePlant = useArchivePlant()
   const deletePlant = useDeletePlant()
   const { data: siteLocations } = useSiteLocations()
 
@@ -619,14 +622,14 @@ export default function PlantDetailPage() {
     } catch { toast.error('Failed to save') }
   }
 
-  // ─ archive / delete ───────────────────────────────────────────────────────
-  async function handleArchive() {
-    if (!confirm(`Archive ${plant?.name}? You can restore it later.`)) return
-    try {
-      await archivePlant.mutateAsync(id)
-      toast.success('Plant archived')
-      router.push('/')
-    } catch { toast.error('Failed to archive') }
+  // ─ goodbye / delete ───────────────────────────────────────────────────────
+  function handleGoodbyeDone(reason: DepartureReason) {
+    if (!plant) return
+    const meta = DEPARTURE_REASONS[reason]
+    toast.success(meta.farewell(displayName(plant)), {
+      action: { label: 'View', onClick: () => router.push(meta.path) },
+    })
+    router.push('/plants')
   }
 
   async function handleDelete() {
@@ -657,6 +660,12 @@ export default function PlantDetailPage() {
         <button onClick={() => router.push('/')} className="text-leaf-500 font-medium">Go Home</button>
       </div>
     )
+  }
+
+  // Plants that left the collection get a read-only memorial page.
+  // While the farewell sheet is still animating, keep the normal page underneath.
+  if (plant.archived_at && !showGoodbye) {
+    return <MemorialView plant={plant} />
   }
 
   const wateredOverdue = plant.next_watered_at && isPast(parseISO(plant.next_watered_at)) && !isToday(parseISO(plant.next_watered_at))
@@ -691,10 +700,10 @@ export default function PlantDetailPage() {
                 <Edit2 size={16} className="mr-2" /> Edit Plant
               </Link>
               <button
-                onClick={() => { setShowMenu(false); handleArchive() }}
+                onClick={() => { setShowMenu(false); setShowGoodbye(true) }}
                 className="w-full flex items-center px-4 py-3 text-sm text-olive-500 hover:bg-stone-200 transition-colors"
               >
-                <Archive size={16} className="mr-2" /> Archive
+                <Feather size={16} className="mr-2" /> Say goodbye…
               </button>
               <button
                 onClick={() => { setShowMenu(false); handleDelete() }}
@@ -803,6 +812,13 @@ export default function PlantDetailPage() {
         )}
         {tab === 'history' && <HistoryTab plantId={id} plant={plant} />}
       </main>
+
+      <GoodbyeSheet
+        plant={plant}
+        open={showGoodbye}
+        onOpenChange={setShowGoodbye}
+        onDone={handleGoodbyeDone}
+      />
 
       {/* FAB */}
       <AddLogSheet

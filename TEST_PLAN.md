@@ -41,7 +41,7 @@ Legend: `[ ]` not tested · `[x]` pass · `[!]` bug found
 - [ ] Plants icon → navigates to `/plants`, icon highlighted
 - [ ] `+` FAB → navigates to `/plants/new`, Plants icon highlighted (correct — adding IS a plants action)
 - [ ] Sites icon → navigates to `/sites`, icon highlighted
-- [ ] Nav is visible on: `/`, `/plants`, `/sites`, `/archive`
+- [ ] Nav is visible on: `/`, `/plants`, `/sites`, `/plants/heaven`, `/plants/rehomed`
 - [ ] Nav is hidden on: `/plants/[id]`, `/plants/new`, `/plants/[id]/edit` (detail/form pages have their own back button)
 
 ### 2.2 Back navigation
@@ -179,8 +179,8 @@ Legend: `[ ]` not tested · `[x]` pass · `[!]` bug found
 
 ### 6.7 Overflow menu
 - [ ] "Edit Plant" → navigates to `/plants/[id]/edit`
-- [ ] "Archive" → confirm dialog → archives plant → redirect to `/`
-- [ ] Archived plant disappears from Tasks, Plants, Sites
+- [ ] "Say goodbye…" → goodbye sheet opens (see §9.1)
+- [ ] Departed plant disappears from Tasks, Plants, Sites
 - [ ] "Delete" → confirm dialog → deletes plant + all logs → redirect to `/`
 
 ---
@@ -217,13 +217,44 @@ Legend: `[ ]` not tested · `[x]` pass · `[!]` bug found
 
 ---
 
-## 9. Archive (`/archive`)
+## 9. Plant Heaven & Rehomed
 
-- [ ] Navigate via plant overflow menu → Archive → plant appears in `/archive`
-- [ ] Plant in archive shows grayscale photo
-- [ ] Restore → plant back in collection, `archived_at` cleared
-- [ ] Delete → confirm → plant permanently deleted (no restore possible)
-- [ ] Archive page accessible at `/archive` URL directly
+### 9.1 Saying goodbye (plant overflow menu → "Say goodbye…")
+- [ ] Step 1 shows three choices: passed away / gave it away / stayed at my old home
+- [ ] Step 2: date defaults to today, future dates blocked; note is optional
+- [ ] "Stayed at my old home" shows "Where it stayed", prefilled with the plant's site
+- [ ] Back chevron returns to step 1
+- [ ] "Say goodbye" → leaf animation + farewell text → redirect to `/plants` → toast with "View"
+- [ ] "View" in the toast opens Plant Heaven (passed away) or Rehomed (others)
+
+### 9.2 Entrances
+- [ ] End of `/plants` list: "Plants that were once with you" with Plant Heaven / Rehomed rows + counts
+- [ ] Footer hidden while searching and when no plants have departed; empty rows hidden
+- [ ] Footer shows "N archived plants need a place" when unsorted plants exist
+- [ ] User menu (avatar) → Plant Heaven / Rehomed with counts
+- [ ] `/archive` redirects to `/plants/rehomed`
+
+### 9.3 Plant Heaven (`/plants/heaven`)
+- [ ] Sky gradient + quote of the day (same quote all day)
+- [ ] Only passed-away plants; newest first; soft sepia photo; dates, "With you for …", note
+- [ ] Empty state links to Rehomed
+
+### 9.4 Rehomed (`/plants/rehomed`)
+- [ ] Own quote; "Given away" section shows the note (who has it)
+- [ ] "Stayed behind" plants grouped by place with counts
+- [ ] "Needs a place" section for plants archived before this feature → "What happened?" → choose reason → moves to the right page
+- [ ] "I got it back" → confirm → plant back in collection
+
+### 9.5 Memorial page (`/plants/[id]` for a departed plant)
+- [ ] No tasks, care stats, status switcher or add-log FAB
+- [ ] Shows reason + date, life span, time together, place, note
+- [ ] "Your time together" counts from logs; "Moments" photo grid; read-only history
+- [ ] ⋯ → Edit memory → change reason/date/note → saved
+- [ ] ⋯ → Bring back → plant active again: no overdue flood, "Check soil" task today
+- [ ] ⋯ → Forget forever → two confirms → deleted → back to Heaven/Rehomed
+
+### 9.6 Sites
+- [ ] Deleting a site keeps `location` on departed plants (only active plants are cleared)
 
 ---
 
@@ -273,5 +304,4 @@ Legend: `[ ]` not tested · `[x]` pass · `[!]` bug found
 
 - Misting/fertilizing interval lookup is Claude-only (Perenual free tier doesn't provide these)
 - Species lookup adds ~2–4s latency to plant save when species changes
-- Archive page has no nav link — accessed only via plant overflow menu (intentional)
 - No offline support beyond PWA installability

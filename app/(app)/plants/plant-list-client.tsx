@@ -5,6 +5,7 @@ import { Plus, Search } from 'lucide-react'
 import { useState } from 'react'
 import { usePlants } from '@/lib/hooks/use-plants'
 import { PlantCard } from '@/components/plants/plant-card'
+import { DepartedFooter } from '@/components/plants/departed-footer'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export function PlantListClient() {
@@ -70,6 +71,8 @@ export function PlantListClient() {
           ))}
         </div>
       )}
+
+      {!isLoading && !search && <DepartedFooter />}
     </div>
   )
 }

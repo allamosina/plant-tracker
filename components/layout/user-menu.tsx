@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { LogOut, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
+import { useDepartedCounts } from '@/lib/hooks/use-plants'
+import { HEAVEN_PATH, REHOMED_PATH } from '@/lib/departure'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +20,7 @@ import { Button } from '@/components/ui/button'
 export function UserMenu() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
+  const { heaven, rehomed } = useDepartedCounts()
 
   async function handleSignOut() {
     setLoading(true)
@@ -42,7 +45,17 @@ export function UserMenu() {
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem className="cursor-pointer" onClick={() => router.push(HEAVEN_PATH)}>
+          <span className="w-4 mr-2 text-center" aria-hidden>🕊</span>
+          <span className={`flex-1 ${heaven ? '' : 'text-muted-foreground'}`}>Plant Heaven</span>
+          <span className="text-xs text-muted-foreground">{heaven || ''}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem className="cursor-pointer" onClick={() => router.push(REHOMED_PATH)}>
+          <span className="w-4 mr-2 text-center" aria-hidden>🌱</span>
+          <span className={`flex-1 ${rehomed ? '' : 'text-muted-foreground'}`}>Rehomed</span>
+          <span className="text-xs text-muted-foreground">{rehomed || ''}</span>
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="text-destructive focus:text-destructive cursor-pointer"

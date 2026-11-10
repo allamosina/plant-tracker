@@ -27,6 +27,7 @@ A mobile-first plant care tracker with AI-powered care schedule recommendations.
 - **Check-soil tasks** — new plants with no watering history get a soil-check task before the watering cadence starts
 - **Sites / locations** — group plants by room or outdoor space; attach geo coordinates for hemisphere-aware seasonal adjustments
 - **Care log history** — timestamped log of all care events per plant
+- **Plant Heaven & Rehomed** — say goodbye to a plant (passed away / given away / left at an old home); remembered plants get a memorial page with time together, notes and photos
 - **Watering recommendations** — Claude-generated plain-language watering guide per plant, cached on the record
 - **PWA** — installable on iOS and Android from the browser
 
@@ -63,13 +64,15 @@ A mobile-first plant care tracker with AI-powered care schedule recommendations.
 │       ├── plants/
 │       │   ├── page.tsx         # Plant list
 │       │   ├── new/page.tsx     # Add plant
+│       │   ├── heaven/page.tsx  # Plant Heaven — plants that passed away
+│       │   ├── rehomed/page.tsx # Rehomed — given away / left at an old home
 │       │   └── [id]/
 │       │       ├── page.tsx     # Plant detail
 │       │       └── edit/page.tsx
 │       ├── sites/
 │       │   ├── page.tsx         # Sites list
 │       │   └── [name]/page.tsx  # Site detail + environment settings
-│       └── archive/page.tsx
+│       └── archive/page.tsx     # Redirects to /plants/rehomed
 │
 ├── components/
 │   ├── layout/
@@ -133,6 +136,8 @@ Run migrations in order in the Supabase SQL editor:
 7. `supabase/migrations/006_location_geo.sql`
 8. `supabase/migrations/007_plant_drainage.sql`
 9. `supabase/migrations/008_plant_check_soil.sql`
+10. `supabase/migrations/009_repair_fertilizing.sql`
+11. `supabase/migrations/010_plant_departure.sql`
 
 ---
 
@@ -192,7 +197,10 @@ Core table. One row per plant per user.
 | `pot_height_cm` | integer | |
 | `has_drainage` | boolean | Drainage hole present |
 | `watering_recommendation` | text | Cached Claude-generated watering guide |
-| `archived_at` | timestamptz | Soft delete |
+| `archived_at` | timestamptz | Departure date (soft delete) |
+| `departure_reason` | enum | `passed_away` (Plant Heaven), `given_away` / `left_behind` (Rehomed); null = unsorted |
+| `departure_note` | text | Optional words: what happened / who has it now |
+| `departure_place` | text | Where it stayed (snapshot, survives site deletion) |
 
 ### `plant_logs`
 
