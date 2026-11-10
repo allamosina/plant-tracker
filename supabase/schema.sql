@@ -4,6 +4,7 @@ create extension if not exists "uuid-ossp";
 -- Enums
 create type plant_status as enum ('healthy', 'needs_attention', 'recovering');
 create type log_type as enum ('watering', 'fertilizing', 'repotting', 'pruning', 'issue_observed');
+create type departure_reason as enum ('passed_away', 'given_away', 'left_behind');
 
 -- Plants table
 create table plants (
@@ -36,6 +37,9 @@ create table plants (
   temperature_max integer,
   soil_type text,
   archived_at timestamptz,
+  departure_reason departure_reason,
+  departure_note text,
+  departure_place text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -59,6 +63,7 @@ create index plants_user_id_idx on plants(user_id);
 create index plants_status_idx on plants(status);
 create index plants_next_watered_idx on plants(next_watered_at) where archived_at is null;
 create index plants_next_fertilized_idx on plants(next_fertilized_at) where archived_at is null;
+create index plants_departed_idx on plants(user_id, departure_reason) where archived_at is not null;
 create index plant_logs_plant_id_idx on plant_logs(plant_id);
 create index plant_logs_user_id_idx on plant_logs(user_id);
 create index plant_logs_date_idx on plant_logs(date desc);

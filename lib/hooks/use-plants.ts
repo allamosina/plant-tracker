@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { parseISO, isBefore, startOfToday } from 'date-fns'
+import { parseISO, isBefore, startOfToday, addDays, format } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
-import type { Plant, UpcomingTask } from '@/lib/types'
+import type { DepartureReason, Plant, UpcomingTask } from '@/lib/types'
 
 export function useLocations() {
   return useQuery({
@@ -20,7 +20,8 @@ export function useLocations() {
   })
 }
 
-export function useArchivedPlants() {
+/** All plants that left the collection (Plant Heaven + Rehomed), most recent first. */
+export function useDepartedPlants() {
   return useQuery({
     queryKey: ['plants', 'archived'],
     queryFn: async () => {
@@ -34,6 +35,15 @@ export function useArchivedPlants() {
       return data as Plant[]
     },
   })
+}
+
+/** Counts for the Plant Heaven / Rehomed entrances. Unsorted plants count as Rehomed. */
+export function useDepartedCounts() {
+  const { data } = useDepartedPlants()
+  const plants = data ?? []
+  const heaven = plants.filter((p) => p.departure_reason === 'passed_away').length
+  const unsorted = plants.filter((p) => !p.departure_reason).length
+  return { heaven, rehomed: plants.length - heaven, unsorted, total: plants.length }
 }
 
 export function usePlants() {
@@ -103,7 +113,10 @@ export function useCreatePlant() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (
-      values: Omit<Plant, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'archived_at'>
+      values: Omit<
+        Plant,
+        'id' | 'user_id' | 'created_at' | 'updated_at' | 'archived_at' | 'departure_reason' | 'departure_note' | 'departure_place'
+      >
     ) => {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
@@ -145,15 +158,68 @@ export function useUpdatePlant(id: string) {
   })
 }
 
-export function useArchivePlant() {
+export interface DepartureInput {
+  id: string
+  reason: DepartureReason
+  /** YYYY-MM-DD */
+  date: string
+  note: string | null
+  place: string | null
+}
+
+/** Say goodbye to a plant, or edit how it left (reason, date, note, place). */
+export function useSetDeparture() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({ id, reason, date, note, place }: DepartureInput) => {
       const supabase = createClient()
       const { error } = await supabase
         .from('plants')
-        .update({ archived_at: new Date().toISOString() })
+        .update({
+          // Noon local time keeps the calendar day stable across time zones
+          archived_at: new Date(`${date}T12:00:00`).toISOString(),
+          departure_reason: reason,
+          departure_note: note?.trim() || null,
+          departure_place: place?.trim() || null,
+        })
         .eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plants'] })
+    },
+  })
+}
+
+/**
+ * Bring a plant back into the collection. Care dates from before it left are
+ * stale, so instead of flooding Tasks with overdue items we ask to check the
+ * soil today and push any overdue misting/fertilizing to a fresh cycle.
+ */
+export function useRestorePlant() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (plant: Plant) => {
+      const today = startOfToday()
+      const todayStr = format(today, 'yyyy-MM-dd')
+      const freshCycle = (next: string | null, interval: number | null) => {
+        if (!next || !isBefore(parseISO(next), today)) return next
+        return format(addDays(today, interval ?? 7), 'yyyy-MM-dd')
+      }
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('plants')
+        .update({
+          archived_at: null,
+          departure_reason: null,
+          departure_note: null,
+          departure_place: null,
+          next_watered_at: null,
+          next_check_soil_at: todayStr,
+          next_misted_at: freshCycle(plant.next_misted_at, plant.misting_interval_days),
+          next_fertilized_at: freshCycle(plant.next_fertilized_at, plant.fertilizing_interval_days),
+        })
+        .eq('id', plant.id)
       if (error) throw error
     },
     onSuccess: () => {

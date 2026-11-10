@@ -75,6 +75,7 @@ export function useReschedulePlantsAtLocation() {
         .select('*')
         .eq('location', locationName)
         .eq('user_id', user.id)
+        .is('archived_at', null)
       if (!plants?.length) return
       for (const plant of plants) {
         const smart = computeSmartWateringInterval(plant as Plant, geoLat)
@@ -123,12 +124,14 @@ export function useDeleteSiteLocation() {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error('Not authenticated')
-      // Clear location from all plants at this site
+      // Clear location from active plants at this site. Departed plants keep it:
+      // it's part of their memory ("stayed at the old flat").
       await supabase
         .from('plants')
         .update({ location: null })
         .eq('location', name)
         .eq('user_id', user.id)
+        .is('archived_at', null)
       // Delete the location record if it exists
       await supabase
         .from('locations')
